@@ -47,13 +47,14 @@ export function SuitIcon({
   }
 }
 
-type Size = "xs" | "sm" | "md" | "lg";
+type Size = "xs" | "sm" | "md" | "lg" | "xl";
 
 const SIZES: Record<Size, { w: string; h: string; rank: string; corner: string; center: string }> = {
   xs: { w: "w-8", h: "h-11", rank: "text-[9px]", corner: "w-2", center: "w-4" },
   sm: { w: "w-11", h: "h-[3.9rem]", rank: "text-[11px]", corner: "w-2.5", center: "w-5" },
   md: { w: "w-14", h: "h-20", rank: "text-sm", corner: "w-3", center: "w-7" },
   lg: { w: "w-[4.5rem]", h: "h-[6.5rem]", rank: "text-base", corner: "w-3.5", center: "w-9" },
+  xl: { w: "w-20", h: "h-28", rank: "text-lg", corner: "w-4", center: "w-10" },
 };
 
 /** Kartu remi — wajah krem dengan indeks sudut, atau punggung anyaman merah. */
