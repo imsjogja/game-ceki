@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ScrollText, LayoutGrid, LogOut, Layers, ArrowDownToLine, Sparkles,
-  Loader2, GripVertical, ArrowUpDown,
+  Loader2, GripVertical, ArrowUpDown, MoveHorizontal,
 } from "lucide-react";
 
 // ----------------------------------------------------------
@@ -43,7 +43,7 @@ function TurnTimer({ startedAt, isBot }: { startedAt: number; isBot: boolean }) 
   const pct = (remain / TURN_TIMEOUT_MS) * 100;
   const secs = Math.ceil(remain / 1000);
   return (
-    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-white/10">
+    <div className="mt-1 h-1 w-24 overflow-hidden rounded-full bg-white/10">
       <div
         className={cn("h-full rounded-full transition-all", secs <= 15 ? "bg-[#c10328]" : "bg-[#f5c036]")}
         style={{ width: `${pct}%` }}
@@ -63,28 +63,27 @@ function PendingPill({ show, label }: { show: boolean; label?: string }) {
   );
 }
 
+/** Kursi lawan — ringkas: avatar, nama, timer, tumpukan kartu + jumlah.
+ *  Tidak lagi merentangkan semua kartu agar tak menabrak area meja. */
 function OpponentSeat({
   player,
   state,
-  position,
 }: {
   player: ClientPlayer;
   state: ClientState;
-  position: string;
 }) {
   const isTurn = state.status === "playing" && state.turnSeat === player.seat;
-  const reveal = state.status === "roundEnd" || state.status === "finished";
-  const backs = Math.min(player.handCount, 11);
+  const backs = Math.max(0, Math.min(3, player.handCount));
 
   return (
-    <div className={cn("absolute z-20 flex w-32 flex-col items-center", position)}>
+    <div className="flex w-36 flex-col items-center">
       <div className={cn("relative rounded-full", isTurn && "turn-glow")}>
         {player.avatar ? (
-          <img src={player.avatar} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-black/40" />
+          <img src={player.avatar} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-black/40" />
         ) : (
           <span
             className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-full font-display text-xl ring-2 ring-black/40",
+              "flex h-11 w-11 items-center justify-center rounded-full font-display text-lg ring-2 ring-black/40",
               player.isBot ? "bg-[#3a3a35] text-white/80" : "bg-[#286e44] text-[#FEFEEE]",
             )}
           >
@@ -95,24 +94,21 @@ function OpponentSeat({
           {player.score}
         </span>
       </div>
-      <p className="mt-1.5 max-w-32 truncate text-xs font-semibold text-[#FEFEEE]">
+      <p className="mt-1 max-w-36 truncate text-xs font-semibold text-[#FEFEEE]">
         {player.name}
         {player.isBot && <span className="ml-1 text-[9px] text-white/40">BOT</span>}
       </p>
       <TurnTimer startedAt={isTurn ? state.turnStartedAt : 0} isBot={!isTurn || player.isBot} />
-      {/* kartu lawan */}
-      <div className="mt-1.5 flex h-9 items-start justify-center">
-        {reveal && player.hand
-          ? player.hand.map((c, i) => (
-              <div key={`${c}-${i}`} className="-ml-5 first:ml-0">
-                <PlayingCard code={c} size="xs" />
-              </div>
-            ))
-          : Array.from({ length: backs }).map((_, i) => (
-              <div key={i} className="-ml-5 first:ml-0">
-                <PlayingCard back size="xs" />
-              </div>
-            ))}
+      {/* tumpukan kartu lawan + jumlah */}
+      <div className="relative mt-1.5 h-9 w-12">
+        {Array.from({ length: backs }).map((_, i) => (
+          <div key={i} className="absolute" style={{ left: i * 6, top: -i }}>
+            <PlayingCard back size="xs" />
+          </div>
+        ))}
+        <span className="absolute -right-2.5 -top-1.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/80 px-1 font-num text-[10px] font-bold text-[#FEFEEE] ring-1 ring-white/25">
+          {player.handCount}
+        </span>
       </div>
       {/* poin meld milik lawan */}
       {player.meldPlus > 0 && (
@@ -254,7 +250,7 @@ export function GameTable({ code }: { code: string }) {
     setManualOrder(null);
   };
 
-  // posisi lawan relatif terhadap saya (searah jarum jam)
+  // lawan lain, searah jarum jam dari posisiku
   const others = (() => {
     if (!me) return state.players;
     const n = state.players.length;
@@ -266,258 +262,261 @@ export function GameTable({ code }: { code: string }) {
     return list;
   })();
 
-  const positions =
-    others.length === 1
-      ? ["top-2 left-1/2 -translate-x-1/2"]
-      : others.length === 2
-        ? ["top-2 left-[16%]", "top-2 right-[16%]"]
-        : ["top-24 left-2", "top-2 left-1/2 -translate-x-1/2", "top-24 right-2"];
-
   const currentPlayer = state.players.find((p) => p.seat === state.turnSeat);
   // kaskade buangan: hanya 7 teratas yang relevan (aturan ambil maks 7)
   const fanSize = Math.min(7, state.discard.length);
   const fanCards = state.discard.slice(-fanSize);
   const buriedCount = state.discard.length - fanSize;
 
+  // ── geometri kipas tangan ──
+  const n = displayHand.length;
+  const mid = (n - 1) / 2;
+  /** jarak antar kartu (px) — kipas hampir selebar panggung */
+  const fanGap = n <= 1 ? 0 : Math.max(30, Math.min(54, 820 / (n - 1)));
+  /** sudut antar kartu — total sebaran ±~17° */
+  const fanStep = n <= 1 ? 0 : Math.min(5, 34 / n);
+
   return (
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <PendingPill show={anyPending} label={pendingLabel} />
+    // panggung lebar: di layar sempit meja bisa digeser horizontal,
+    // tidak ada lagi elemen yang saling menindih
+    <div className="h-dvh overflow-x-auto overflow-y-hidden bg-[#14110d]">
+      <div className="flex h-full min-w-[920px] flex-col">
+        <PendingPill show={anyPending} label={pendingLabel} />
 
-      {/* ===== Header meja ===== */}
-      <header className="relative z-30 flex items-center justify-between gap-2 px-3 py-2 sm:px-6">
-        <Logo size="text-2xl" />
-        <div className="flex items-center gap-2 text-center">
-          <span className="hidden font-display text-lg tracking-wide text-white/60 sm:block">
-            {data?.name}
-          </span>
-          <span className="rounded-full border border-dashed border-[#f5c036]/40 px-3 py-0.5 font-num text-xs font-bold tracking-[0.25em] text-[#f5c036]">
-            {code}
-          </span>
-          <span className="rounded-full bg-black/40 px-3 py-0.5 font-num text-xs text-white/60">
-            Sesi {state.round} · {state.targetScore}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            size="sm" variant="ghost"
-            onClick={() => setScoreOpen(true)}
-            className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]"
-          >
-            <LayoutGrid className="h-4 w-4" />
-            <span className="hidden sm:inline">Skor</span>
-          </Button>
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]">
-                <ScrollText className="h-4 w-4" />
-                <span className="hidden sm:inline">Log</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent className="border-l-[#f5c036]/30 bg-[#1c1812] text-[#FEFEEE]">
-              <SheetHeader>
-                <SheetTitle className="font-display text-2xl tracking-wide text-[#f5c036]">
-                  LOG PERMAINAN
-                </SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 space-y-1.5 overflow-y-auto">
-                {[...state.log].reverse().map((l, i) => (
-                  <p key={`${l.t}-${i}`} className="border-l-2 border-[#286e44]/60 pl-2 text-xs text-white/70">
-                    {l.msg}
-                  </p>
-                ))}
-              </div>
-            </SheetContent>
-          </Sheet>
-          <Button
-            size="sm" variant="ghost"
-            disabled={leave.isPending}
-            onClick={() => {
-              if (me) leave.mutate({ code });
-              else navigate("/");
-            }}
-            className="h-8 gap-1.5 text-white/70 hover:text-[#c10328]"
-          >
-            {leave.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-            <span className="hidden sm:inline">{me ? "Keluar" : "Beranda"}</span>
-          </Button>
-        </div>
-      </header>
+        {/* ===== Header meja ===== */}
+        <header className="relative z-30 flex shrink-0 items-center justify-between gap-2 px-3 py-2 sm:px-6">
+          <Logo size="text-2xl" />
+          <div className="flex items-center gap-2 text-center">
+            <span className="hidden font-display text-lg tracking-wide text-white/60 sm:block">
+              {data?.name}
+            </span>
+            <span className="rounded-full border border-dashed border-[#f5c036]/40 px-3 py-0.5 font-num text-xs font-bold tracking-[0.25em] text-[#f5c036]">
+              {code}
+            </span>
+            <span className="rounded-full bg-black/40 px-3 py-0.5 font-num text-xs text-white/60">
+              Sesi {state.round} · {state.targetScore}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm" variant="ghost"
+              onClick={() => setScoreOpen(true)}
+              className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">Skor</span>
+            </Button>
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]">
+                  <ScrollText className="h-4 w-4" />
+                  <span className="hidden sm:inline">Log</span>
+                </Button>
+              </SheetTrigger>
+              <SheetContent className="border-l-[#f5c036]/30 bg-[#1c1812] text-[#FEFEEE]">
+                <SheetHeader>
+                  <SheetTitle className="font-display text-2xl tracking-wide text-[#f5c036]">
+                    LOG PERMAINAN
+                  </SheetTitle>
+                </SheetHeader>
+                <div className="mt-4 space-y-1.5 overflow-y-auto">
+                  {[...state.log].reverse().map((l, i) => (
+                    <p key={`${l.t}-${i}`} className="border-l-2 border-[#286e44]/60 pl-2 text-xs text-white/70">
+                      {l.msg}
+                    </p>
+                  ))}
+                </div>
+              </SheetContent>
+            </Sheet>
+            <Button
+              size="sm" variant="ghost"
+              disabled={leave.isPending}
+              onClick={() => {
+                if (me) leave.mutate({ code });
+                else navigate("/");
+              }}
+              className="h-8 gap-1.5 text-white/70 hover:text-[#c10328]"
+            >
+              {leave.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              <span className="hidden sm:inline">{me ? "Keluar" : "Beranda"}</span>
+            </Button>
+          </div>
+        </header>
 
-      {/* ===== Area meja ===== */}
-      <div className="relative min-h-0 flex-1">
-        {/* meja felt */}
-        <div className="absolute left-1/2 top-1/2 h-[88%] w-[min(96vw,70rem)] -translate-x-1/2 -translate-y-1/2">
-          <div className="felt felt-hatch absolute inset-0 rounded-[3rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)] sm:rounded-[50%]" />
-          <div className="stitch pointer-events-none absolute inset-3 rounded-[2.5rem] sm:inset-5 sm:rounded-[46%]" />
+        <p className="flex shrink-0 items-center justify-center gap-1 pb-1 text-[10px] text-white/35 sm:hidden">
+          <MoveHorizontal className="h-3 w-3" /> Geser ke samping untuk melihat seluruh meja
+        </p>
+
+        {/* ===== Meja felt: lawan + banner + area tengah ===== */}
+        <div className="relative mx-auto flex min-h-0 w-full max-w-[68rem] flex-1 flex-col px-3 pb-2">
+          <div className="felt felt-hatch absolute inset-x-3 inset-y-0 rounded-[2rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)]" />
+          <div className="stitch pointer-events-none absolute inset-x-6 inset-y-3 rounded-[1.6rem]" />
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.07]">
             <div className="flex items-center gap-2">
-              <SuitIcon suit="S" className="h-16 w-16" />
-              <span className="font-display text-8xl">REMIKU</span>
-              <SuitIcon suit="H" className="h-16 w-16" />
-            </div>
-          </div>
-        </div>
-
-        {/* lawan */}
-        {others.map((p, i) => (
-          <OpponentSeat key={p.seat} player={p} state={state} position={positions[i]} />
-        ))}
-
-        {/* banner giliran */}
-        {state.status === "playing" && !myTurn && (
-          <div className="absolute left-1/2 top-[36%] z-10 -translate-x-1/2">
-            <span className="rounded-full bg-black/60 px-4 py-1.5 font-display text-lg tracking-wide text-[#FEFEEE]/90 backdrop-blur-sm">
-              GILIRAN {currentPlayer?.name?.toUpperCase()}
-            </span>
-          </div>
-        )}
-        {state.status === "playing" && myTurn && (
-          <div className="absolute left-1/2 top-[36%] z-10 -translate-x-1/2">
-            <span className="rounded-full bg-[#f5c036] px-4 py-1.5 font-display text-lg tracking-wide text-[#1a150a] shadow-lg">
-              {phase === "draw" ? "GILIRANMU — AMBIL KARTU" : "BUKA KOMBINASI, LALU BUANG"}
-            </span>
-          </div>
-        )}
-
-        {/* area tengah: rak kombinasi jadi + tumpukan */}
-        <div className="absolute left-1/2 top-1/2 z-10 flex w-[min(92vw,60rem)] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-5 px-4">
-          {/* rak kartu jadi */}
-          <div className="max-h-52 min-h-24 max-w-[58%] flex-1 overflow-y-auto rounded-xl bg-black/15 p-2 ring-1 ring-white/5">
-            {state.melds.length === 0 && !state.closedCard && (
-              <p className="py-6 text-center font-display text-xl tracking-wide text-white/25">
-                BELUM ADA KARTU JADI
-              </p>
-            )}
-            <div className="flex flex-wrap content-start items-start justify-center gap-2.5">
-              {state.melds.map((m) => {
-                const owner = state.players.find((p) => p.seat === m.ownerSeat);
-                return (
-                  <div
-                    key={m.id}
-                    className="rounded-lg bg-black/30 p-1.5 pb-1 ring-1 ring-white/10"
-                  >
-                    <div className="flex">
-                      {m.cards.map((c, i) => (
-                        <div key={`${c}-${i}`} className="-ml-8 first:ml-0">
-                          <PlayingCard code={c} size="sm" />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
-                      <span className="max-w-16 truncate text-[9px] font-semibold text-white/60">
-                        {owner?.name}
-                      </span>
-                      <span className="font-num text-[9px] font-bold text-[#f5c036]">
-                        +{m.points}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-              {/* kartu tutup tangan (tertutup) */}
-              {state.closedCard && (
-                <div className="rounded-lg bg-[#f5c036]/10 p-1.5 pb-1 ring-1 ring-[#f5c036]/40">
-                  {state.closedCard === "BACK" ? (
-                    <PlayingCard back size="sm" />
-                  ) : (
-                    <PlayingCard code={state.closedCard} size="sm" />
-                  )}
-                  <p className="mt-1 text-center text-[9px] font-bold text-[#f5c036]">TUTUP</p>
-                </div>
-              )}
+              <SuitIcon suit="S" className="h-14 w-14" />
+              <span className="font-display text-7xl">REMIKU</span>
+              <SuitIcon suit="H" className="h-14 w-14" />
             </div>
           </div>
 
-          {/* tumpukan deck & kaskade buangan */}
-          <div className="flex shrink-0 items-start gap-4 sm:gap-6">
-            {/* deck */}
-            <div className="flex flex-col items-center gap-1">
-              <div
-                onClick={() => myTurn && phase === "draw" && !anyPending && draw.mutate({ code, from: "stock", depth: 0 })}
-                className={cn("relative", myTurn && phase === "draw" && !anyPending && "cursor-pointer")}
-              >
-                {state.stockCount > 1 && (
-                  <div className="absolute -left-1 -top-1 opacity-70"><PlayingCard back size="md" /></div>
-                )}
-                <div className={cn("relative", myTurn && phase === "draw" && "animate-pulse ring-4 ring-[#f5c036]/80 rounded-[0.45rem]")}>
-                  <PlayingCard back size="md" />
-                </div>
-                <span className="absolute -right-2 -top-2 z-10 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#f5c036] px-1 font-num text-xs font-bold text-[#1a150a]">
-                  {state.stockCount}
-                </span>
-                {draw.isPending && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[0.45rem] bg-black/60">
-                    <Loader2 className="h-5 w-5 animate-spin text-[#f5c036]" />
-                  </div>
-                )}
-              </div>
-              <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-white/50">
-                <Layers className="h-3 w-3" /> DECK
+          {/* baris lawan — selalu di jalurnya sendiri, tak menindih apa pun */}
+          <div className="relative z-10 flex shrink-0 items-start justify-around gap-2 px-8 pt-3">
+            {others.map((p) => (
+              <OpponentSeat key={p.seat} player={p} state={state} />
+            ))}
+          </div>
+
+          {/* baris banner giliran — ruang khusus, tinggi tetap */}
+          <div className="relative z-10 flex h-9 shrink-0 items-center justify-center">
+            {state.status === "playing" && !myTurn && (
+              <span className="rounded-full bg-black/60 px-4 py-1 font-display text-base tracking-wide text-[#FEFEEE]/90 backdrop-blur-sm">
+                GILIRAN {currentPlayer?.name?.toUpperCase()}
               </span>
-            </div>
+            )}
+            {state.status === "playing" && myTurn && (
+              <span className="rounded-full bg-[#f5c036] px-4 py-1 font-display text-base tracking-wide text-[#1a150a] shadow-lg">
+                {phase === "draw" ? "GILIRANMU — AMBIL KARTU" : "BUKA KOMBINASI, LALU BUANG"}
+              </span>
+            )}
+          </div>
 
-            {/* kaskade buangan: bertumpuk ke kanan, indeks tiap kartu tetap terlihat.
-                Hanya 7 teratas yang ditampilkan (batas ambil) — sisanya terkubur rapi. */}
-            <div className="flex flex-col items-center gap-1">
-              <div className="relative h-20" style={{ width: `${56 + Math.max(0, fanSize - 1) * 20}px` }}>
-                {fanCards.length === 0 && (
-                  <div className="flex h-20 w-14 items-center justify-center rounded-[0.45rem] border-2 border-dashed border-white/20 text-white/20">
-                    <SuitIcon suit="D" className="h-5 w-5" />
-                  </div>
-                )}
-                {fanCards.map((c, i) => {
-                  const depth = fanCards.length - 1 - i; // 0 = paling atas (paling kanan)
-                  const ok = takeableDepth(depth);
-                  const isTop = depth === 0;
+          {/* zona tengah: rak kartu jadi + tumpukan deck/buangan */}
+          <div className="relative z-10 flex min-h-0 flex-1 items-stretch gap-4 px-5 pb-4 pt-1">
+            {/* rak kartu jadi */}
+            <div className="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl bg-black/20 p-2 ring-1 ring-white/5">
+              {state.melds.length === 0 && !state.closedCard && (
+                <p className="py-6 text-center font-display text-xl tracking-wide text-white/25">
+                  BELUM ADA KARTU JADI
+                </p>
+              )}
+              <div className="flex flex-wrap content-start items-start justify-center gap-2.5">
+                {state.melds.map((m) => {
+                  const owner = state.players.find((p) => p.seat === m.ownerSeat);
                   return (
                     <div
-                      key={`${c}-${state.discard.length - fanSize + i}`}
-                      className="absolute top-0"
-                      style={{ left: i * 20, zIndex: i }}
+                      key={m.id}
+                      className="rounded-lg bg-black/30 p-1.5 pb-1 ring-1 ring-white/10"
                     >
-                      <div
-                        onClick={() => ok && !anyPending && draw.mutate({ code, from: "discard", depth })}
-                        title={ok ? (depth === 0 ? "Ambil kartu ini" : `Ambil ${depth + 1} kartu`) : undefined}
-                        className={cn(
-                          "relative transition-all",
-                          ok && !anyPending && "cursor-pointer hover:-translate-y-2",
-                          !ok && "brightness-[0.65]",
-                          ok && isTop && myTurn && phase === "draw" && "animate-pulse ring-4 ring-[#f5c036]/80 rounded-[0.45rem]",
-                        )}
-                      >
-                        <PlayingCard code={c} size="md" />
-                        {ok && depth > 0 && (
-                          <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#f5c036] px-1.5 font-num text-[10px] font-bold text-[#1a150a] shadow">
-                            +{depth + 1}
-                          </span>
-                        )}
+                      <div className="flex">
+                        {m.cards.map((c, i) => (
+                          <div key={`${c}-${i}`} className="-ml-8 first:ml-0">
+                            <PlayingCard code={c} size="sm" />
+                          </div>
+                        ))}
+                      </div>
+                      <div className="mt-1 flex items-center justify-between gap-2 px-0.5">
+                        <span className="max-w-16 truncate text-[9px] font-semibold text-white/60">
+                          {owner?.name}
+                        </span>
+                        <span className="font-num text-[9px] font-bold text-[#f5c036]">
+                          +{m.points}
+                        </span>
                       </div>
                     </div>
                   );
                 })}
-                {draw.isPending && (
-                  <div className="absolute inset-0 z-30 flex items-center justify-center rounded-[0.45rem] bg-black/40">
-                    <Loader2 className="h-5 w-5 animate-spin text-[#f5c036]" />
+                {/* kartu tutup tangan (tertutup) */}
+                {state.closedCard && (
+                  <div className="rounded-lg bg-[#f5c036]/10 p-1.5 pb-1 ring-1 ring-[#f5c036]/40">
+                    {state.closedCard === "BACK" ? (
+                      <PlayingCard back size="sm" />
+                    ) : (
+                      <PlayingCard code={state.closedCard} size="sm" />
+                    )}
+                    <p className="mt-1 text-center text-[9px] font-bold text-[#f5c036]">TUTUP</p>
                   </div>
                 )}
               </div>
-              <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-white/50">
-                <Sparkles className="h-3 w-3" /> BUANGAN
-                {buriedCount > 0 && (
-                  <span className="rounded bg-black/50 px-1 font-num text-[9px] text-white/40">
-                    +{buriedCount} terkubur
+            </div>
+
+            {/* tumpukan deck & kaskade buangan — klaster tetap di kanan */}
+            <div className="flex shrink-0 items-center gap-6 self-center pr-1">
+              {/* deck */}
+              <div className="flex flex-col items-center gap-1">
+                <div
+                  onClick={() => myTurn && phase === "draw" && !anyPending && draw.mutate({ code, from: "stock", depth: 0 })}
+                  className={cn("relative", myTurn && phase === "draw" && !anyPending && "cursor-pointer")}
+                >
+                  {state.stockCount > 1 && (
+                    <div className="absolute -left-1 -top-1 opacity-70"><PlayingCard back size="lg" /></div>
+                  )}
+                  <div className={cn("relative", myTurn && phase === "draw" && "animate-pulse ring-4 ring-[#f5c036]/80 rounded-[0.45rem]")}>
+                    <PlayingCard back size="lg" />
+                  </div>
+                  <span className="absolute -right-2 -top-2 z-10 flex h-6 min-w-6 items-center justify-center rounded-full bg-[#f5c036] px-1 font-num text-xs font-bold text-[#1a150a]">
+                    {state.stockCount}
                   </span>
-                )}
-              </span>
+                  {draw.isPending && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center rounded-[0.45rem] bg-black/60">
+                      <Loader2 className="h-5 w-5 animate-spin text-[#f5c036]" />
+                    </div>
+                  )}
+                </div>
+                <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-white/50">
+                  <Layers className="h-3 w-3" /> DECK
+                </span>
+              </div>
+
+              {/* kaskade buangan: bertumpuk ke kanan, indeks tiap kartu tetap terlihat.
+                  Hanya 7 teratas yang ditampilkan (batas ambil) — sisanya terkubur rapi. */}
+              <div className="flex flex-col items-center gap-1">
+                <div className="relative h-[6.5rem]" style={{ width: `${72 + Math.max(0, fanSize - 1) * 22}px` }}>
+                  {fanCards.length === 0 && (
+                    <div className="flex h-[6.5rem] w-[4.5rem] items-center justify-center rounded-[0.45rem] border-2 border-dashed border-white/20 text-white/20">
+                      <SuitIcon suit="D" className="h-5 w-5" />
+                    </div>
+                  )}
+                  {fanCards.map((c, i) => {
+                    const depth = fanCards.length - 1 - i; // 0 = paling atas (paling kanan)
+                    const ok = takeableDepth(depth);
+                    const isTop = depth === 0;
+                    return (
+                      <div
+                        key={`${c}-${state.discard.length - fanSize + i}`}
+                        className="absolute top-0"
+                        style={{ left: i * 22, zIndex: i }}
+                      >
+                        <div
+                          onClick={() => ok && !anyPending && draw.mutate({ code, from: "discard", depth })}
+                          title={ok ? (depth === 0 ? "Ambil kartu ini" : `Ambil ${depth + 1} kartu`) : undefined}
+                          className={cn(
+                            "relative transition-all",
+                            ok && !anyPending && "cursor-pointer hover:-translate-y-2",
+                            !ok && "brightness-[0.65]",
+                            ok && isTop && myTurn && phase === "draw" && "animate-pulse ring-4 ring-[#f5c036]/80 rounded-[0.45rem]",
+                          )}
+                        >
+                          <PlayingCard code={c} size="lg" />
+                          {ok && depth > 0 && (
+                            <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#f5c036] px-1.5 font-num text-[10px] font-bold text-[#1a150a] shadow">
+                              +{depth + 1}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {draw.isPending && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center rounded-[0.45rem] bg-black/40">
+                      <Loader2 className="h-5 w-5 animate-spin text-[#f5c036]" />
+                    </div>
+                  )}
+                </div>
+                <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-white/50">
+                  <Sparkles className="h-3 w-3" /> BUANGAN
+                  {buriedCount > 0 && (
+                    <span className="rounded bg-black/50 px-1 font-num text-[9px] text-white/40">
+                      +{buriedCount} terkubur
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ===== Panel bawah: info + aksi + tangan ===== */}
-      <div className="relative z-30 pb-2">
-        {/* bar aksi */}
-        <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center justify-center gap-2 px-3">
+        {/* ===== Bar aksi ===== */}
+        <div className="relative z-30 flex shrink-0 flex-wrap items-center justify-center gap-2 px-3 py-2">
           {me && myPlayer && (
             <>
               <span className="rounded-full bg-black/60 px-3 py-1.5 font-num text-xs font-bold text-[#FEFEEE] ring-1 ring-white/15">
@@ -586,36 +585,48 @@ export function GameTable({ code }: { code: string }) {
           )}
         </div>
 
-        {/* tangan saya — bisa diseret untuk menyusun manual */}
+        {/* ===== Kipas tangan saya — lebar, melengkung, bisa diseret ===== */}
         {me && myPlayer?.hand && (
-          <div className="flex flex-col items-center px-2 pb-1 pt-4">
+          <div className="relative z-30 flex shrink-0 flex-col items-center pb-1">
             <Reorder.Group
               axis="x"
               values={displayHand}
               onReorder={(v: CardCode[]) => setManualOrder(v)}
-              className="flex max-w-full overflow-x-auto pb-1"
+              className="flex h-36 items-end justify-center"
               key={`round-${state.round}`}
             >
-              {displayHand.map((c, i) => (
-                <Reorder.Item
-                  key={c}
-                  value={c}
-                  initial={{ y: 80, opacity: 0, rotate: -6 }}
-                  animate={{ y: 0, opacity: 1, rotate: 0 }}
-                  transition={{ type: "spring", stiffness: 260, damping: 24, delay: i * 0.04 }}
-                  whileDrag={{ scale: 1.12, zIndex: 50 }}
-                  className={cn("-ml-8 first:ml-0 sm:-ml-7", manualOrder && "cursor-grab active:cursor-grabbing")}
-                >
-                  <PlayingCard
-                    code={c}
-                    size="md"
-                    selected={selected.includes(c)}
-                    dimmed={myTurn && phase === "play" && selected.length > 0 && !selected.includes(c)}
-                    disabled={!myTurn || phase !== "play"}
-                    onClick={() => toggleSelect(c)}
-                  />
-                </Reorder.Item>
-              ))}
+              {displayHand.map((c, i) => {
+                const rot = (i - mid) * fanStep;
+                return (
+                  <Reorder.Item
+                    key={c}
+                    value={c}
+                    initial={{ y: 80, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ type: "spring", stiffness: 260, damping: 24, delay: i * 0.04 }}
+                    whileDrag={{ scale: 1.1, zIndex: 50 }}
+                    style={{ marginLeft: i === 0 ? 0 : fanGap - 80, zIndex: i }}
+                    className={cn(manualOrder && "cursor-grab active:cursor-grabbing")}
+                  >
+                    {/* kipas: rotasi di wrapper agar tak bentrok dengan drag */}
+                    <div
+                      style={{
+                        transform: `rotate(${rot}deg)`,
+                        transformOrigin: "50% 135%",
+                      }}
+                    >
+                      <PlayingCard
+                        code={c}
+                        size="xl"
+                        selected={selected.includes(c)}
+                        dimmed={myTurn && phase === "play" && selected.length > 0 && !selected.includes(c)}
+                        disabled={!myTurn || phase !== "play"}
+                        onClick={() => toggleSelect(c)}
+                      />
+                    </div>
+                  </Reorder.Item>
+                );
+              })}
             </Reorder.Group>
             <p className="mt-0.5 flex items-center gap-1 text-[10px] text-white/30">
               <GripVertical className="h-3 w-3" /> Seret kartu untuk menyusun manual
@@ -625,7 +636,7 @@ export function GameTable({ code }: { code: string }) {
 
         {/* penonton */}
         {!me && (
-          <p className="pb-3 text-center text-sm text-white/40">
+          <p className="shrink-0 pb-3 text-center text-sm text-white/40">
             Mode penonton — kamu menyaksikan meja ini secara langsung.
           </p>
         )}
