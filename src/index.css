@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Kasino gelap — felt hijau, emas, krem */
+    --background: 30 6% 7%;
+    --foreground: 48 100% 96%;
+    --card: 30 6% 10%;
+    --card-foreground: 48 100% 96%;
+    --popover: 30 8% 9%;
+    --popover-foreground: 48 100% 96%;
+    --primary: 43 91% 59%;
+    --primary-foreground: 30 10% 8%;
+    --secondary: 152 44% 29%;
+    --secondary-foreground: 48 100% 96%;
+    --muted: 30 5% 16%;
+    --muted-foreground: 40 10% 62%;
+    --accent: 152 44% 29%;
+    --accent-foreground: 48 100% 96%;
+    --destructive: 350 98% 39%;
+    --destructive-foreground: 48 100% 96%;
+    --border: 40 8% 22%;
+    --input: 40 8% 22%;
+    --ring: 43 91% 59%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    background: #14110d;
+  }
+  body {
+    @apply text-foreground antialiased;
+    font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(40, 110, 68, 0.22), transparent 60%),
+      radial-gradient(900px 500px at 85% 110%, rgba(193, 3, 40, 0.1), transparent 60%),
+      #14110d;
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Bebas Neue", "Arial Narrow", sans-serif;
+    letter-spacing: 0.02em;
+  }
+  .font-num {
+    font-family: "Space Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Permukaan felt meja */
+  .felt {
+    background:
+      radial-gradient(ellipse 90% 80% at 50% 38%, #2f7d4e 0%, #286e44 42%, #1d5433 74%, #143c24 100%);
+  }
+  .felt-hatch {
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 3px);
+  }
+
+  /* Jahitan emas khas meja kartu */
+  .stitch {
+    border: 2px dashed rgba(245, 192, 54, 0.55);
+  }
+  .stitch-soft {
+    border: 1.5px dashed rgba(245, 192, 54, 0.35);
+  }
+
+  /* Tombol emas dengan bayangan berat (3D lift) */
+  .btn-gold {
+    @apply font-display inline-flex items-center justify-center gap-2 rounded-full bg-[#f5c036] px-7 text-xl tracking-wide text-[#1a150a] transition-all duration-150 select-none;
+    box-shadow: 0 5px 0 #a67c14, 0 10px 24px rgba(245, 192, 54, 0.25);
+  }
+  .btn-gold:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 7px 0 #a67c14, 0 14px 28px rgba(245, 192, 54, 0.35);
+  }
+  .btn-gold:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #a67c14, 0 6px 16px rgba(245, 192, 54, 0.2);
+  }
+  .btn-gold:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .btn-stitch {
+    @apply font-display inline-flex items-center justify-center gap-2 rounded-full px-6 text-lg tracking-wide text-[#f5c036] transition-all duration-150 select-none;
+    border: 2px dashed rgba(245, 192, 54, 0.6);
+  }
+  .btn-stitch:hover:not(:disabled) {
+    background: rgba(245, 192, 54, 0.12);
+    border-color: #f5c036;
+  }
+  .btn-stitch:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Cincin giliran yang berdenyut */
+  .turn-glow {
+    box-shadow:
+      0 0 0 3px rgba(245, 192, 54, 0.9),
+      0 0 24px 6px rgba(245, 192, 54, 0.45);
+    animation: turn-pulse 1.6s ease-in-out infinite;
+  }
+
+  .card-shadow {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.4),
+      0 6px 16px rgba(0, 0, 0, 0.35);
+  }
+
+  .text-gold-glow {
+    text-shadow: 0 0 24px rgba(245, 192, 54, 0.45);
+  }
+}
+
+@keyframes turn-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3px rgba(245, 192, 54, 0.9),
+      0 0 18px 4px rgba(245, 192, 54, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(245, 192, 54, 1),
+      0 0 32px 10px rgba(245, 192, 54, 0.55);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-glow {
+    animation: none;
+  }
+}
