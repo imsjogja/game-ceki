@@ -22,10 +22,37 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ScrollText, LayoutGrid, LogOut, Layers, ArrowDownToLine, Sparkles,
-  Loader2, GripVertical, ArrowUpDown, MoveHorizontal,
+  Loader2, GripVertical, ArrowUpDown,
 } from "lucide-react";
 
 // ----------------------------------------------------------
+// Panggung meja ber-ukuran tetap (kanvas desain) yang di-scale agar
+// selalu pas di layar — pola yang dipakai game kartu profesional.
+// Tidak ada lagi zona yang remuk/menindih di layar pendek atau sempit.
+const STAGE_W = 960;
+const STAGE_H = 620;
+
+function useStageScale() {
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const update = () => {
+      const s = Math.min(
+        window.innerWidth / STAGE_W,
+        window.innerHeight / STAGE_H,
+        1.3, // batas pembesaran di layar besar
+      );
+      setScale(s);
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+    };
+  }, []);
+  return scale;
+}
 
 function useNow(stepMs = 500) {
   const [now, setNow] = useState(Date.now());
@@ -43,7 +70,7 @@ function TurnTimer({ startedAt, isBot }: { startedAt: number; isBot: boolean }) 
   const pct = (remain / TURN_TIMEOUT_MS) * 100;
   const secs = Math.ceil(remain / 1000);
   return (
-    <div className="mt-1 h-1 w-24 overflow-hidden rounded-full bg-white/10">
+    <div className="mt-0.5 h-1 w-20 overflow-hidden rounded-full bg-white/10">
       <div
         className={cn("h-full rounded-full transition-all", secs <= 15 ? "bg-[#c10328]" : "bg-[#f5c036]")}
         style={{ width: `${pct}%` }}
@@ -63,8 +90,7 @@ function PendingPill({ show, label }: { show: boolean; label?: string }) {
   );
 }
 
-/** Kursi lawan — ringkas: avatar, nama, timer, tumpukan kartu + jumlah.
- *  Tidak lagi merentangkan semua kartu agar tak menabrak area meja. */
+/** Kursi lawan — ringkas: avatar, nama, timer, tumpukan kartu + jumlah. */
 function OpponentSeat({
   player,
   state,
@@ -76,43 +102,51 @@ function OpponentSeat({
   const backs = Math.max(0, Math.min(3, player.handCount));
 
   return (
-    <div className="flex w-36 flex-col items-center">
-      <div className={cn("relative rounded-full", isTurn && "turn-glow")}>
-        {player.avatar ? (
-          <img src={player.avatar} alt="" className="h-11 w-11 rounded-full object-cover ring-2 ring-black/40" />
-        ) : (
-          <span
-            className={cn(
-              "flex h-11 w-11 items-center justify-center rounded-full font-display text-lg ring-2 ring-black/40",
-              player.isBot ? "bg-[#3a3a35] text-white/80" : "bg-[#286e44] text-[#FEFEEE]",
-            )}
-          >
-            {player.name[0]?.toUpperCase()}
+    <div className="flex w-32 flex-col items-center">
+      <div className="flex items-center gap-2">
+        <div className={cn("relative rounded-full", isTurn && "turn-glow")}>
+          {player.avatar ? (
+            <img src={player.avatar} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-black/40" />
+          ) : (
+            <span
+              className={cn(
+                "flex h-10 w-10 items-center justify-center rounded-full font-display text-base ring-2 ring-black/40",
+                player.isBot ? "bg-[#3a3a35] text-white/80" : "bg-[#286e44] text-[#FEFEEE]",
+              )}
+            >
+              {player.name[0]?.toUpperCase()}
+            </span>
+          )}
+          <span className="absolute -bottom-1 -right-1 rounded-full bg-black/70 px-1.5 py-0.5 font-num text-[10px] font-bold text-[#f5c036] ring-1 ring-[#f5c036]/40">
+            {player.score}
           </span>
-        )}
-        <span className="absolute -bottom-1 -right-1 rounded-full bg-black/70 px-1.5 py-0.5 font-num text-[10px] font-bold text-[#f5c036] ring-1 ring-[#f5c036]/40">
-          {player.score}
-        </span>
+        </div>
+        {/* tumpukan kartu lawan + jumlah */}
+        <div className="relative h-8 w-8">
+          {Array.from({ length: backs }).map((_, i) => (
+            <div
+              key={i}
+              className="absolute h-7 w-5 rounded-[3px] bg-[#c10328] ring-1 ring-[#f5c036]/40"
+              style={{
+                left: i * 5,
+                top: -i,
+                backgroundImage:
+                  "repeating-linear-gradient(45deg, rgba(245,192,54,.18) 0 1.5px, transparent 1.5px 4.5px)",
+              }}
+            />
+          ))}
+          <span className="absolute -right-2 -top-1.5 z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/80 px-1 font-num text-[9px] font-bold text-[#FEFEEE] ring-1 ring-white/25">
+            {player.handCount}
+          </span>
+        </div>
       </div>
-      <p className="mt-1 max-w-36 truncate text-xs font-semibold text-[#FEFEEE]">
+      <p className="mt-1 max-w-32 truncate text-[11px] font-semibold text-[#FEFEEE]">
         {player.name}
-        {player.isBot && <span className="ml-1 text-[9px] text-white/40">BOT</span>}
+        {player.isBot && <span className="ml-1 text-[8px] text-white/40">BOT</span>}
       </p>
       <TurnTimer startedAt={isTurn ? state.turnStartedAt : 0} isBot={!isTurn || player.isBot} />
-      {/* tumpukan kartu lawan + jumlah */}
-      <div className="relative mt-1.5 h-9 w-12">
-        {Array.from({ length: backs }).map((_, i) => (
-          <div key={i} className="absolute" style={{ left: i * 6, top: -i }}>
-            <PlayingCard back size="xs" />
-          </div>
-        ))}
-        <span className="absolute -right-2.5 -top-1.5 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-black/80 px-1 font-num text-[10px] font-bold text-[#FEFEEE] ring-1 ring-white/25">
-          {player.handCount}
-        </span>
-      </div>
-      {/* poin meld milik lawan */}
       {player.meldPlus > 0 && (
-        <span className="mt-1 rounded bg-[#286e44]/50 px-1.5 py-0.5 font-num text-[10px] font-bold text-[#7fd4a4]">
+        <span className="mt-0.5 rounded bg-[#286e44]/50 px-1.5 py-0.5 font-num text-[10px] font-bold leading-none text-[#7fd4a4]">
           +{player.meldPlus}
         </span>
       )}
@@ -126,6 +160,7 @@ export function GameTable({ code }: { code: string }) {
   useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
+  const scale = useStageScale();
 
   const roomQuery = trpc.rummy.get.useQuery(
     { code },
@@ -268,26 +303,33 @@ export function GameTable({ code }: { code: string }) {
   const fanCards = state.discard.slice(-fanSize);
   const buriedCount = state.discard.length - fanSize;
 
-  // ── geometri kipas tangan ──
+  // ── geometri kipas tangan (landai, ala Gin Rummy Palace) ──
   const n = displayHand.length;
   const mid = (n - 1) / 2;
-  /** jarak antar kartu (px) — kipas hampir selebar panggung */
-  const fanGap = n <= 1 ? 0 : Math.max(30, Math.min(54, 820 / (n - 1)));
-  /** sudut antar kartu — total sebaran ±~17° */
-  const fanStep = n <= 1 ? 0 : Math.min(5, 34 / n);
+  /** jarak antar kartu (px) — kipas lebar namun tetap rapat */
+  const fanGap = n <= 1 ? 0 : Math.max(32, Math.min(58, 850 / (n - 1)));
+  /** sudut antar kartu — sebaran total ±~10° agar tidak melengkung dalam */
+  const fanStep = n <= 1 ? 0 : Math.min(2.8, 28 / n);
 
   return (
-    // panggung lebar: di layar sempit meja bisa digeser horizontal,
-    // tidak ada lagi elemen yang saling menindih
-    <div className="h-dvh overflow-x-auto overflow-y-hidden bg-[#14110d]">
-      <div className="flex h-full min-w-[920px] flex-col">
-        <PendingPill show={anyPending} label={pendingLabel} />
+    <div className="flex h-dvh w-full items-center justify-center overflow-hidden bg-[#14110d]">
+      <PendingPill show={anyPending} label={pendingLabel} />
 
+      {/* ===== Panggung meja: kanvas 960×620 yang di-scale fit ===== */}
+      <div
+        className="flex shrink-0 flex-col"
+        style={{
+          width: STAGE_W,
+          height: STAGE_H,
+          transform: `scale(${scale})`,
+          transformOrigin: "center center",
+        }}
+      >
         {/* ===== Header meja ===== */}
-        <header className="relative z-30 flex shrink-0 items-center justify-between gap-2 px-3 py-2 sm:px-6">
-          <Logo size="text-2xl" />
+        <header className="relative z-30 flex h-11 shrink-0 items-center justify-between gap-2 px-2">
+          <Logo size="text-xl" />
           <div className="flex items-center gap-2 text-center">
-            <span className="hidden font-display text-lg tracking-wide text-white/60 sm:block">
+            <span className="font-display text-base tracking-wide text-white/60">
               {data?.name}
             </span>
             <span className="rounded-full border border-dashed border-[#f5c036]/40 px-3 py-0.5 font-num text-xs font-bold tracking-[0.25em] text-[#f5c036]">
@@ -304,13 +346,13 @@ export function GameTable({ code }: { code: string }) {
               className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]"
             >
               <LayoutGrid className="h-4 w-4" />
-              <span className="hidden sm:inline">Skor</span>
+              Skor
             </Button>
             <Sheet>
               <SheetTrigger asChild>
                 <Button size="sm" variant="ghost" className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]">
                   <ScrollText className="h-4 w-4" />
-                  <span className="hidden sm:inline">Log</span>
+                  Log
                 </Button>
               </SheetTrigger>
               <SheetContent className="border-l-[#f5c036]/30 bg-[#1c1812] text-[#FEFEEE]">
@@ -338,19 +380,15 @@ export function GameTable({ code }: { code: string }) {
               className="h-8 gap-1.5 text-white/70 hover:text-[#c10328]"
             >
               {leave.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-              <span className="hidden sm:inline">{me ? "Keluar" : "Beranda"}</span>
+              {me ? "Keluar" : "Beranda"}
             </Button>
           </div>
         </header>
 
-        <p className="flex shrink-0 items-center justify-center gap-1 pb-1 text-[10px] text-white/35 sm:hidden">
-          <MoveHorizontal className="h-3 w-3" /> Geser ke samping untuk melihat seluruh meja
-        </p>
-
         {/* ===== Meja felt: lawan + banner + area tengah ===== */}
-        <div className="relative mx-auto flex min-h-0 w-full max-w-[68rem] flex-1 flex-col px-3 pb-2">
-          <div className="felt felt-hatch absolute inset-x-3 inset-y-0 rounded-[2rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)]" />
-          <div className="stitch pointer-events-none absolute inset-x-6 inset-y-3 rounded-[1.6rem]" />
+        <div className="relative mx-auto flex min-h-0 w-full flex-1 flex-col px-2">
+          <div className="felt felt-hatch absolute inset-x-2 inset-y-0 rounded-[1.6rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)]" />
+          <div className="stitch pointer-events-none absolute inset-x-5 inset-y-2.5 rounded-[1.2rem]" />
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.07]">
             <div className="flex items-center gap-2">
               <SuitIcon suit="S" className="h-14 w-14" />
@@ -359,8 +397,8 @@ export function GameTable({ code }: { code: string }) {
             </div>
           </div>
 
-          {/* baris lawan — selalu di jalurnya sendiri, tak menindih apa pun */}
-          <div className="relative z-10 flex shrink-0 items-start justify-around gap-2 px-8 pt-3">
+          {/* baris lawan — jalur tetap, tak pernah menindih */}
+          <div className="relative z-10 flex h-[92px] shrink-0 items-start justify-around gap-2 px-10 pt-2">
             {others.map((p) => (
               <OpponentSeat key={p.seat} player={p} state={state} />
             ))}
@@ -381,7 +419,7 @@ export function GameTable({ code }: { code: string }) {
           </div>
 
           {/* zona tengah: rak kartu jadi + tumpukan deck/buangan */}
-          <div className="relative z-10 flex min-h-0 flex-1 items-stretch gap-4 px-5 pb-4 pt-1">
+          <div className="relative z-10 flex min-h-0 flex-1 items-stretch gap-4 px-6 pb-3 pt-1">
             {/* rak kartu jadi */}
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl bg-black/20 p-2 ring-1 ring-white/5">
               {state.melds.length === 0 && !state.closedCard && (
@@ -516,7 +554,7 @@ export function GameTable({ code }: { code: string }) {
         </div>
 
         {/* ===== Bar aksi ===== */}
-        <div className="relative z-30 flex shrink-0 flex-wrap items-center justify-center gap-2 px-3 py-2">
+        <div className="relative z-30 flex h-12 shrink-0 flex-wrap items-center justify-center gap-2 px-3">
           {me && myPlayer && (
             <>
               <span className="rounded-full bg-black/60 px-3 py-1.5 font-num text-xs font-bold text-[#FEFEEE] ring-1 ring-white/15">
@@ -585,14 +623,14 @@ export function GameTable({ code }: { code: string }) {
           )}
         </div>
 
-        {/* ===== Kipas tangan saya — lebar, melengkung, bisa diseret ===== */}
-        {me && myPlayer?.hand && (
-          <div className="relative z-30 flex shrink-0 flex-col items-center pb-1">
+        {/* ===== Kipas tangan saya — lebar, landai, bisa diseret ===== */}
+        {me && myPlayer?.hand ? (
+          <div className="relative z-30 flex h-[152px] shrink-0 flex-col items-center">
             <Reorder.Group
               axis="x"
               values={displayHand}
               onReorder={(v: CardCode[]) => setManualOrder(v)}
-              className="flex h-36 items-end justify-center"
+              className="flex h-[134px] items-end justify-center"
               key={`round-${state.round}`}
             >
               {displayHand.map((c, i) => {
@@ -612,7 +650,7 @@ export function GameTable({ code }: { code: string }) {
                     <div
                       style={{
                         transform: `rotate(${rot}deg)`,
-                        transformOrigin: "50% 135%",
+                        transformOrigin: "50% 120%",
                       }}
                     >
                       <PlayingCard
@@ -632,13 +670,12 @@ export function GameTable({ code }: { code: string }) {
               <GripVertical className="h-3 w-3" /> Seret kartu untuk menyusun manual
             </p>
           </div>
-        )}
-
-        {/* penonton */}
-        {!me && (
-          <p className="shrink-0 pb-3 text-center text-sm text-white/40">
-            Mode penonton — kamu menyaksikan meja ini secara langsung.
-          </p>
+        ) : (
+          <div className="flex h-[152px] shrink-0 items-center justify-center">
+            <p className="text-sm text-white/40">
+              Mode penonton — kamu menyaksikan meja ini secara langsung.
+            </p>
+          </div>
         )}
       </div>
 
