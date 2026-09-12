@@ -22,7 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ScrollText, LayoutGrid, LogOut, Layers, ArrowDownToLine, Sparkles,
-  Loader2, GripVertical, ArrowUpDown,
+  Loader2, GripVertical, ArrowUpDown, Mic, MicOff,
 } from "lucide-react";
 
 // ----------------------------------------------------------
@@ -94,13 +94,21 @@ function PendingPill({ show, label }: { show: boolean; label?: string }) {
   );
 }
 
+/** Status voice chat satu pemain. */
+export interface SeatVoice {
+  speaking: boolean;
+  muted: boolean;
+}
+
 /** Kursi lawan — ringkas: avatar, nama, timer, tumpukan kartu + jumlah. */
 function OpponentSeat({
   player,
   state,
+  voice,
 }: {
   player: ClientPlayer;
   state: ClientState;
+  voice?: SeatVoice;
 }) {
   const isTurn = state.status === "playing" && state.turnSeat === player.seat;
   const backs = Math.max(0, Math.min(3, player.handCount));
@@ -108,7 +116,13 @@ function OpponentSeat({
   return (
     <div className="flex w-32 flex-col items-center">
       <div className="flex items-center gap-2">
-        <div className={cn("relative rounded-full", isTurn && "turn-glow")}>
+        <div
+          className={cn(
+            "relative rounded-full",
+            isTurn && "turn-glow",
+            voice?.speaking && !voice.muted && "speaking-glow",
+          )}
+        >
           {player.avatar ? (
             <img src={player.avatar} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-black/40" />
           ) : (
@@ -124,6 +138,21 @@ function OpponentSeat({
           <span className="absolute -bottom-1 -right-1 rounded-full bg-black/70 px-1.5 py-0.5 font-num text-[10px] font-bold text-[#f5c036] ring-1 ring-[#f5c036]/40">
             {player.score}
           </span>
+          {voice && (
+            <span
+              title={voice.muted ? `${player.name} — mic mati` : `${player.name} — di voice chat`}
+              className={cn(
+                "absolute -left-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full ring-1 ring-black/50",
+                voice.muted ? "bg-[#c10328]" : "bg-[#286e44]",
+              )}
+            >
+              {voice.muted ? (
+                <MicOff className="h-2.5 w-2.5 text-white" />
+              ) : (
+                <Mic className="h-2.5 w-2.5 text-white" />
+              )}
+            </span>
+          )}
         </div>
         {/* tumpukan kartu lawan + jumlah */}
         <div className="relative h-8 w-8">
@@ -160,7 +189,13 @@ function OpponentSeat({
 
 // ----------------------------------------------------------
 
-export function GameTable({ code }: { code: string }) {
+export function GameTable({
+  code,
+  voiceBySeat,
+}: {
+  code: string;
+  voiceBySeat?: Map<number, SeatVoice>;
+}) {
   useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
@@ -404,7 +439,12 @@ export function GameTable({ code }: { code: string }) {
           {/* baris lawan — jalur tetap, tak pernah menindih */}
           <div className="relative z-10 flex h-[92px] shrink-0 items-start justify-around gap-2 px-10 pt-2">
             {others.map((p) => (
-              <OpponentSeat key={p.seat} player={p} state={state} />
+              <OpponentSeat
+                key={p.seat}
+                player={p}
+                state={state}
+                voice={voiceBySeat?.get(p.seat)}
+              />
             ))}
           </div>
 
