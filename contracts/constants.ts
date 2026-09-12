@@ -1,6 +1,11 @@
 export const Session = {
-  cookieName: "kimi_sid",
+  cookieName: "remiku_sid",
   maxAgeMs: 365 * 24 * 60 * 60 * 1000,
+} as const;
+
+export const GoogleOAuth = {
+  stateCookieName: "remiku_google_oauth",
+  stateMaxAgeMs: 10 * 60 * 1000,
 } as const;
 
 export const ErrorMessages = {
@@ -10,5 +15,6 @@ export const ErrorMessages = {
 
 export const Paths = {
   login: "/login",
-  oauthCallback: "/api/oauth/callback",
+  googleAuthStart: "/api/auth/google",
+  googleOAuthCallback: "/api/auth/google/callback",
 } as const;

@@ -3,10 +3,14 @@ import { Session } from "@contracts/constants";
 import { getSessionCookieOptions } from "./lib/cookies";
 import { createRouter, authedQuery, publicQuery } from "./middleware";
 import { upsertUser } from "./queries/users";
-import { signSessionToken } from "./kimi/session";
-import { env } from "./lib/env";
+import { signSessionToken } from "./auth/session";
+import { isGoogleOAuthConfigured } from "./auth/google";
 
 export const authRouter = createRouter({
+  providers: publicQuery.query(() => ({
+    google: isGoogleOAuthConfigured(),
+  })),
+
   me: authedQuery.query((opts) => opts.ctx.user),
 
   // Login tamu: langsung masuk tanpa OAuth, identitas acak per sesi
@@ -14,7 +18,7 @@ export const authRouter = createRouter({
     const unionId = `guest-${crypto.randomUUID()}`;
     const name = `Tamu-${Math.floor(1000 + Math.random() * 9000)}`;
     await upsertUser({ unionId, name, lastSignInAt: new Date() });
-    const token = await signSessionToken({ unionId, clientId: env.appId });
+    const token = await signSessionToken({ unionId });
     const opts = getSessionCookieOptions(ctx.req.headers);
     ctx.resHeaders.append(
       "set-cookie",

@@ -23,7 +23,7 @@ export async function upsertUser(data: InsertUser) {
   if (
     values.role === undefined &&
     values.unionId &&
-    values.unionId === env.ownerUnionId
+    values.unionId === `google:${env.ownerGoogleSub}`
   ) {
     values.role = "admin";
     updateSet.role = "admin";

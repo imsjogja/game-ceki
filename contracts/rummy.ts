@@ -257,6 +257,8 @@ export interface RoundHistoryEntry {
 }
 
 export interface GameState {
+  /** Asal meja menentukan aturan lobby dan privasi aksesnya. */
+  matchType: "private" | "bot" | "stranger";
   status: "waiting" | "playing" | "roundEnd" | "finished";
   phase: "draw" | "play";
   round: number; // nomor sesi
@@ -312,8 +314,10 @@ export function createRoomState(opts: {
   hostAvatar: string | null;
   targetScore: number;
   maxPlayers: number;
+  matchType?: GameState["matchType"];
 }): GameState {
   const state: GameState = {
+    matchType: opts.matchType ?? "private",
     status: "waiting",
     phase: "draw",
     round: 0,
@@ -548,6 +552,7 @@ export interface ClientPlayer {
 }
 
 export interface ClientState {
+  matchType: GameState["matchType"];
   status: GameState["status"];
   phase: GameState["phase"];
   round: number;
@@ -592,6 +597,7 @@ export function sanitizeState(state: GameState, userId: number | null): ClientSt
     };
   });
   return {
+    matchType: state.matchType ?? "private",
     status: state.status,
     phase: state.phase,
     round: state.round,

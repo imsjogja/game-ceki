@@ -1,5 +1,18 @@
+# Dependencies and build output
 node_modules
 dist
+
+# Source-control and editor artifacts
 .git
+.vscode
+.idea
+.DS_Store
 *.swp
 *.log
+
+# Local configuration and test output
+.env
+.env.*
+!.env.example
+!.env.docker.example
+coverage

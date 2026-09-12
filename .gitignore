@@ -39,3 +39,7 @@ build/
 # Test coverage
 coverage/
 .nyc_output/
+
+client_secret_*.json
+
+*-credentials.json

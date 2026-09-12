@@ -1,15 +1,13 @@
-import { useParams, useNavigate } from "react-router";
+import { Navigate, useParams } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Lobby } from "@/components/game/Lobby";
 import { GameTable } from "@/components/game/GameTable";
 import { VoiceControls } from "@/components/game/VoiceControls";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
-import { Button } from "@/components/ui/button";
 
 export default function Room() {
   const { code = "" } = useParams();
-  const navigate = useNavigate();
   const roomCode = code.toUpperCase();
 
   const roomQuery = trpc.rummy.get.useQuery(
@@ -49,26 +47,9 @@ export default function Room() {
   }
 
   if (roomQuery.error || !roomQuery.data) {
-    return (
-      <div className="flex min-h-screen flex-col">
-        <SiteHeader />
-        <div className="flex flex-1 items-center justify-center px-4">
-          <div className="rounded-xl border border-dashed border-[#c10328]/50 bg-black/30 p-8 text-center">
-            <div className="font-display text-4xl text-[#c10328]">ROOM TIDAK DITEMUKAN</div>
-            <p className="mt-2 text-sm text-white/50">
-              Kode <span className="font-num font-bold">{roomCode}</span> tidak valid
-              atau room sudah ditutup.
-            </p>
-            <Button
-              onClick={() => navigate("/")}
-              className="mt-6 rounded-full bg-[#f5c036] font-display text-lg tracking-wide text-[#1a150a] hover:bg-[#ffd35c]"
-            >
-              KE BERANDA
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
+    // Room dapat menjadi tidak bisa diakses saat pemain terakhir keluar atau
+    // sesi logout. Jangan biarkan pemain tertahan pada layar room yang mati.
+    return <Navigate to="/" replace />;
   }
 
   // Selain status waiting, tampilkan meja permainan (pemain & penonton)
@@ -76,7 +57,9 @@ export default function Room() {
     return (
       <>
         <GameTable code={roomCode} voiceBySeat={voice.bySeat} />
-        <VoiceControls voice={voice} />
+        {roomQuery.data.state.matchType !== "stranger" && (
+          <VoiceControls voice={voice} />
+        )}
       </>
     );
   }
@@ -84,7 +67,9 @@ export default function Room() {
   return (
     <>
       <Lobby code={roomCode} />
-      <VoiceControls voice={voice} />
+      {roomQuery.data.state.matchType !== "stranger" && (
+        <VoiceControls voice={voice} />
+      )}
     </>
   );
 }

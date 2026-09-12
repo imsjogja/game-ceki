@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -15,8 +15,19 @@ import {
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from "@/components/ui/accordion";
-import { Users, Bot, Trophy, Target, Copy, History } from "lucide-react";
+import {
+  Users,
+  Bot,
+  Trophy,
+  Target,
+  Copy,
+  History,
+  LoaderCircle,
+  Search,
+  X,
+} from "lucide-react";
 import { TARGET_SCORES } from "@contracts/rummy";
+import { ONLINE_OPPONENT_COUNTS } from "@contracts/matchmaking";
 
 const FAN_CARDS = ["AH", "KH", "QH", "JH", "TH"] as const;
 
@@ -32,6 +43,10 @@ export default function Home() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [botCount, setBotCount] = useState(1);
   const [quickTarget, setQuickTarget] = useState(500);
+  const [onlineOpen, setOnlineOpen] = useState(false);
+  const [onlineOpponents, setOnlineOpponents] = useState(1);
+  const [onlineTarget, setOnlineTarget] = useState(500);
+  const [onlineSearching, setOnlineSearching] = useState(false);
 
   const utils = trpc.useUtils();
 
@@ -42,6 +57,12 @@ export default function Home() {
 
   const quickPlay = trpc.rummy.quickPlay.useMutation({
     onSuccess: (data) => navigate(`/room/${data.code}`),
+    onError: (e) => toast.error(e.message),
+  });
+  const onlineMatch = trpc.rummy.matchmaking.enqueue.useMutation({
+    onError: (e) => toast.error(e.message),
+  });
+  const cancelOnlineMatch = trpc.rummy.matchmaking.cancel.useMutation({
     onError: (e) => toast.error(e.message),
   });
 
@@ -60,6 +81,44 @@ export default function Home() {
     }
   };
 
+  const handleOnlineMatch = async () => {
+    if (!isAuthenticated) {
+      toast.info("Masuk dulu untuk mencari lawan online.");
+      navigate("/login");
+      return;
+    }
+    try {
+      const result = await onlineMatch.mutateAsync({
+        opponents: onlineOpponents,
+        targetScore: onlineTarget,
+      });
+      if (result.status === "matched") {
+        toast.success("Lawan ditemukan! Menyiapkan meja...");
+        navigate(`/room/${result.roomCode}`);
+        return;
+      }
+      setOnlineSearching(true);
+    } catch {
+      // Pesan kesalahan ditampilkan oleh mutation.
+    }
+  };
+
+  const handleCancelOnlineMatch = async () => {
+    try {
+      const result = await cancelOnlineMatch.mutateAsync();
+      if (result.status === "matched") {
+        toast.success("Lawan ditemukan! Menyiapkan meja...");
+        navigate(`/room/${result.roomCode}`);
+        return;
+      }
+      setOnlineSearching(false);
+      setOnlineOpen(false);
+      toast.info("Pencarian lawan dibatalkan.");
+    } catch {
+      // Pesan kesalahan ditampilkan oleh mutation.
+    }
+  };
+
   const statsQuery = trpc.rummy.myStats.useQuery(undefined, {
     enabled: isAuthenticated,
     retry: false,
@@ -70,6 +129,33 @@ export default function Home() {
     refetchIntervalInBackground: false,
     retry: false,
   });
+  const onlineStatus = trpc.rummy.matchmaking.status.useQuery(undefined, {
+    enabled: onlineSearching && isAuthenticated,
+    refetchInterval: onlineSearching ? 2_000 : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
+
+  useEffect(() => {
+    const status = onlineStatus.data;
+    if (!status) return;
+    if (status.status === "matched") {
+      const transition = window.setTimeout(() => {
+        setOnlineSearching(false);
+        setOnlineOpen(false);
+        toast.success("Lawan ditemukan! Menyiapkan meja...");
+        navigate(`/room/${status.roomCode}`);
+      }, 0);
+      return () => window.clearTimeout(transition);
+    } else if (status.status === "idle" && onlineSearching) {
+      const transition = window.setTimeout(() => {
+        setOnlineSearching(false);
+        setOnlineOpen(false);
+        toast.info("Pencarian lawan berakhir.");
+      }, 0);
+      return () => window.clearTimeout(transition);
+    }
+  }, [navigate, onlineSearching, onlineStatus.data]);
 
   const handleCreate = () => {
     if (!isAuthenticated) {
@@ -104,6 +190,8 @@ export default function Home() {
     stats && stats.gamesPlayed > 0
       ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100)
       : 0;
+  const onlineSearchResult =
+    onlineStatus.data?.status === "searching" ? onlineStatus.data : null;
 
   return (
     <div className="min-h-screen">
@@ -217,6 +305,128 @@ export default function Home() {
                       </p>
                     )}
                   </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={onlineOpen}
+                onOpenChange={(open) => {
+                  if (!onlineSearching) setOnlineOpen(open);
+                }}
+              >
+                <DialogTrigger asChild>
+                  <button className="btn-stitch h-12">
+                    <Users className="h-5 w-5" /> LAWAN ONLINE
+                  </button>
+                </DialogTrigger>
+                <DialogContent
+                  className="border-[#286e44]/60 bg-[#1c1812] text-[#FEFEEE]"
+                  onPointerDownOutside={(event) => {
+                    if (onlineSearching) event.preventDefault();
+                  }}
+                  onEscapeKeyDown={(event) => {
+                    if (onlineSearching) event.preventDefault();
+                  }}
+                >
+                  <DialogHeader>
+                    <DialogTitle className="font-display text-3xl tracking-wide text-[#7fd4a4]">
+                      {onlineSearching ? "MENCARI LAWAN..." : "LAWAN PEMAIN ONLINE"}
+                    </DialogTitle>
+                  </DialogHeader>
+                  {onlineSearching ? (
+                    <div className="space-y-5 pt-3 text-center">
+                      <div
+                        className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border-2 border-dashed border-[#7fd4a4]/60 bg-[#286e44]/20"
+                        role="status"
+                        aria-live="polite"
+                        aria-label="Sedang mencari lawan"
+                      >
+                        <LoaderCircle className="h-7 w-7 animate-spin text-[#7fd4a4]" />
+                      </div>
+                      <div>
+                        <p className="font-display text-2xl tracking-wide text-[#FEFEEE]">
+                          MENCARI {onlineSearchResult?.opponentsNeeded ?? onlineOpponents} LAWAN
+                        </p>
+                        <p className="mt-1 text-sm text-white/45">
+                          {onlineSearchResult?.queuedPlayers ?? 1} pemain dengan target {onlineTarget} sudah siap.
+                        </p>
+                        <div className="mx-auto mt-3 flex max-w-xs items-center gap-2 text-left text-xs text-[#7fd4a4]">
+                          <Search className="h-4 w-4 shrink-0 animate-pulse" />
+                          <span>Memperbarui antrean secara otomatis…</span>
+                        </div>
+                      </div>
+                      <p className="rounded-lg border border-white/10 bg-black/25 p-3 text-xs leading-relaxed text-white/45">
+                        Kamu akan masuk meja otomatis saat jumlah pemain lengkap.
+                        Tidak ada bot yang ditambahkan ke awal pertandingan.
+                      </p>
+                      <Button
+                        onClick={handleCancelOnlineMatch}
+                        disabled={cancelOnlineMatch.isPending}
+                        variant="outline"
+                        className="h-11 w-full border-[#c10328]/60 bg-[#c10328]/10 font-display tracking-wide text-[#e0707f] hover:bg-[#c10328]/20 hover:text-white"
+                      >
+                        <X className="h-4 w-4" />
+                        {cancelOnlineMatch.isPending
+                          ? "MEMBATALKAN..."
+                          : "BATALKAN PENCARIAN"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-5 pt-2">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60">
+                          JUMLAH LAWAN
+                        </label>
+                        <div className="flex gap-2">
+                          {ONLINE_OPPONENT_COUNTS.map((n) => (
+                            <button
+                              key={n}
+                              onClick={() => setOnlineOpponents(n)}
+                              className={`flex-1 rounded-lg border-2 py-2 font-num text-lg font-bold transition-all ${
+                                onlineOpponents === n
+                                  ? "border-[#7fd4a4] bg-[#286e44]/25 text-[#7fd4a4]"
+                                  : "border-white/15 text-white/50 hover:border-white/30"
+                              }`}
+                            >
+                              {n} Lawan
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60">
+                          TARGET SKOR
+                        </label>
+                        <div className="flex gap-2">
+                          {TARGET_SCORES.map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setOnlineTarget(t)}
+                              className={`flex-1 rounded-lg border-2 py-2 font-num text-lg font-bold transition-all ${
+                                onlineTarget === t
+                                  ? "border-[#7fd4a4] bg-[#286e44]/25 text-[#7fd4a4]"
+                                  : "border-white/15 text-white/50 hover:border-white/30"
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleOnlineMatch}
+                        disabled={onlineMatch.isPending}
+                        className="h-12 w-full rounded-full bg-[#286e44] font-display text-xl tracking-wide text-[#FEFEEE] hover:bg-[#3a9b63]"
+                      >
+                        <Users className="h-5 w-5" />
+                        {onlineMatch.isPending ? "MENCARI..." : "CARI LAWAN"}
+                      </Button>
+                      <p className="text-center text-[11px] text-white/40">
+                        Match online mempertemukan pemain yang memilih jumlah
+                        lawan dan target skor yang sama.
+                      </p>
+                    </div>
+                  )}
                 </DialogContent>
               </Dialog>
 

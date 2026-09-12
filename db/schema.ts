@@ -58,6 +58,36 @@ export const rooms = mysqlTable(
   }),
 );
 
+export const matchmakingQueue = mysqlTable(
+  "matchmaking_queue",
+  {
+    userId: bigint("userId", { mode: "number", unsigned: true })
+      .primaryKey()
+      .references(() => users.id),
+    opponentCount: int("opponentCount").notNull(),
+    targetScore: int("targetScore").notNull(),
+    status: mysqlEnum("status", ["searching", "matched"])
+      .default("searching")
+      .notNull(),
+    roomCode: varchar("roomCode", { length: 8 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    updatedAt: timestamp("updatedAt")
+      .defaultNow()
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    lookupIdx: index("matchmaking_lookup_idx").on(
+      table.status,
+      table.opponentCount,
+      table.targetScore,
+      table.expiresAt,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const playerStats = mysqlTable("player_stats", {
   userId: bigint("userId", { mode: "number", unsigned: true })
     .primaryKey()
@@ -100,5 +130,6 @@ export const matches = mysqlTable(
 );
 
 export type Room = typeof rooms.$inferSelect;
+export type MatchmakingQueue = typeof matchmakingQueue.$inferSelect;
 export type PlayerStat = typeof playerStats.$inferSelect;
 export type Match = typeof matches.$inferSelect;

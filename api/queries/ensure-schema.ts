@@ -40,6 +40,21 @@ export async function ensureSchema() {
       )
     `);
     await conn.query(`
+      CREATE TABLE IF NOT EXISTS matchmaking_queue (
+        userId bigint unsigned NOT NULL PRIMARY KEY,
+        opponentCount int NOT NULL,
+        targetScore int NOT NULL,
+        status enum('searching','matched') NOT NULL DEFAULT 'searching',
+        roomCode varchar(8),
+        createdAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expiresAt timestamp NOT NULL,
+        updatedAt timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        KEY matchmaking_lookup_idx (status, opponentCount, targetScore, expiresAt, createdAt),
+        CONSTRAINT matchmaking_queue_user_fk
+          FOREIGN KEY (userId) REFERENCES users (id)
+      )
+    `);
+    await conn.query(`
       CREATE TABLE IF NOT EXISTS player_stats (
         userId bigint unsigned NOT NULL PRIMARY KEY,
         gamesPlayed int NOT NULL DEFAULT 0,

@@ -31,7 +31,7 @@ export function Lobby({ code }: { code: string }) {
 
   const join = trpc.rummy.join.useMutation({ onSuccess: invalidate, onError: onErr });
   const leave = trpc.rummy.leave.useMutation({
-    onSuccess: () => navigate("/"),
+    onSuccess: () => navigate("/", { replace: true }),
     onError: onErr,
   });
   const addBot = trpc.rummy.addBot.useMutation({ onSuccess: invalidate, onError: onErr });

@@ -6,25 +6,10 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Ghost } from "lucide-react";
 
-function getOAuthUrl() {
-  const kimiAuthUrl = import.meta.env.VITE_KIMI_AUTH_URL;
-  const appID = import.meta.env.VITE_APP_ID;
-  const redirectUri = `${window.location.origin}/api/oauth/callback`;
-  const state = btoa(redirectUri);
-
-  const url = new URL(`${kimiAuthUrl}/api/oauth/authorize`);
-  url.searchParams.set("client_id", appID);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "profile");
-  url.searchParams.set("state", state);
-
-  return url.toString();
-}
-
 export default function Login() {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
+  const providers = trpc.auth.providers.useQuery(undefined, { retry: false });
   const guestLogin = trpc.auth.guest.useMutation({
     onSuccess: async (data) => {
       await utils.invalidate();
@@ -59,13 +44,19 @@ export default function Login() {
         </CardHeader>
         <CardContent>
           <button
-            className="btn-gold h-12 w-full"
+            className="btn-gold h-12 w-full disabled:cursor-not-allowed disabled:opacity-50"
             onClick={() => {
-              window.location.href = getOAuthUrl();
+              window.location.assign("/api/auth/google");
             }}
+            disabled={providers.isLoading || !providers.data?.google}
           >
-            MASUK DENGAN KIMI
+            MASUK DENGAN GOOGLE
           </button>
+          {!providers.isLoading && !providers.data?.google && (
+            <p className="mt-2 text-center text-[11px] text-white/40">
+              Login Google belum dikonfigurasi di server ini.
+            </p>
+          )}
           <div className="my-3 flex items-center gap-3">
             <span className="h-px flex-1 bg-white/10" />
             <span className="text-[10px] tracking-[0.2em] text-white/30">ATAU</span>

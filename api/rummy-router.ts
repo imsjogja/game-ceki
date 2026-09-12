@@ -28,6 +28,15 @@ import {
   TARGET_SCORES,
   type GameState,
 } from "@contracts/rummy";
+import {
+  ONLINE_OPPONENT_COUNTS,
+  type OnlineOpponentCount,
+} from "@contracts/matchmaking";
+import {
+  cancelMatchmaking,
+  enqueueMatchmaking,
+  getMatchmakingStatus,
+} from "./queries/matchmaking";
 
 const cardSchema = z
   .string()
@@ -48,7 +57,61 @@ function assertHost(state: GameState, userId: number) {
   }
 }
 
+function matchmakingError(error: unknown): never {
+  if (error instanceof Error && error.message) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: error.message });
+  }
+  throw new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "Pencarian lawan sedang bermasalah. Coba lagi.",
+  });
+}
+
 export const rummyRouter = createRouter({
+  matchmaking: createRouter({
+    enqueue: authedQuery
+      .input(
+        z.object({
+          opponents: z
+            .number()
+            .int()
+            .refine((n) =>
+              (ONLINE_OPPONENT_COUNTS as readonly number[]).includes(n),
+            ),
+          targetScore: z
+            .number()
+            .refine((n) => (TARGET_SCORES as readonly number[]).includes(n)),
+        }),
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          return await enqueueMatchmaking(
+            ctx.user,
+            input.opponents as OnlineOpponentCount,
+            input.targetScore,
+          );
+        } catch (error) {
+          return matchmakingError(error);
+        }
+      }),
+
+    status: authedQuery.query(async ({ ctx }) => {
+      try {
+        return await getMatchmakingStatus(ctx.user.id);
+      } catch (error) {
+        return matchmakingError(error);
+      }
+    }),
+
+    cancel: authedQuery.mutation(async ({ ctx }) => {
+      try {
+        return await cancelMatchmaking(ctx.user.id);
+      } catch (error) {
+        return matchmakingError(error);
+      }
+    }),
+  }),
+
   // ---------- Room ----------
   create: authedQuery
     .input(
@@ -73,6 +136,7 @@ export const rummyRouter = createRouter({
         hostAvatar: ctx.user.avatar ?? null,
         targetScore: input.targetScore,
         maxPlayers: input.maxPlayers,
+        matchType: "private",
       });
       pushLog(state, `${ctx.user.name ?? "Pemain"} membuat room`);
       await getDb().insert(rooms).values({
@@ -109,6 +173,7 @@ export const rummyRouter = createRouter({
         hostAvatar: ctx.user.avatar ?? null,
         targetScore: input.targetScore,
         maxPlayers: input.bots + 1,
+        matchType: "bot",
       });
       for (let i = 0; i < input.bots; i++) {
         state.players.push(
@@ -296,6 +361,7 @@ export const rummyRouter = createRouter({
           throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan belum selesai" });
         // reset ke lobby dengan pemain yang sama
         state.status = "waiting";
+        state.matchType = "private";
         state.round = 0;
         state.roundHistory = [];
         state.melds = [];
@@ -324,6 +390,15 @@ export const rummyRouter = createRouter({
     .input(z.object({ code: codeSchema }))
     .query(async ({ ctx, input }) => {
       return withRoom(input.code, async (state, room) => {
+        if (
+          state.matchType === "stranger" &&
+          !getPlayerByUser(state, ctx.user?.id ?? -1)
+        ) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Room lawan online hanya dapat diakses oleh pesertanya.",
+          });
+        }
         // Lazy tick: gerakkan bot / timeout pemain
         tickGame(state);
         // sinyal kehadiran untuk statistik live di landing

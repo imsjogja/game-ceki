@@ -300,7 +300,7 @@ export function GameTable({
   const nextRound = trpc.rummy.nextRound.useMutation({ onSuccess: invalidate, onError: onErr });
   const rematch = trpc.rummy.rematch.useMutation({ onSuccess: invalidate, onError: onErr });
   const leave = trpc.rummy.leave.useMutation({
-    onSuccess: () => navigate("/"),
+    onSuccess: () => navigate("/", { replace: true }),
     onError: onErr,
   });
 
