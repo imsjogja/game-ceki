@@ -65,6 +65,11 @@ export default function Home() {
     retry: false,
   });
   const leaderboard = trpc.rummy.leaderboard.useQuery(undefined, { retry: false });
+  const live = trpc.rummy.liveStats.useQuery(undefined, {
+    refetchInterval: 8000,
+    refetchIntervalInBackground: false,
+    retry: false,
+  });
 
   const handleCreate = () => {
     if (!isAuthenticated) {
@@ -110,6 +115,26 @@ export default function Home() {
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/30" />
         <div className="relative z-10 flex min-h-[26rem] flex-col justify-between gap-8 p-6 sm:p-10 lg:flex-row lg:items-end">
           <div className="max-w-xl">
+            {/* statistik live: siapa yang sedang di meja */}
+            <div className="mb-4 inline-flex items-center gap-4 rounded-full border border-dashed border-[#f5c036]/40 bg-black/45 px-4 py-1.5 backdrop-blur-sm">
+              <span className="flex items-center gap-2 text-xs font-semibold text-[#FEFEEE]/90">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#3ddc84] opacity-60" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#3ddc84]" />
+                </span>
+                <span className="font-num text-sm font-bold text-[#7fd4a4]">
+                  {live.data?.playersOnline ?? "–"}
+                </span>
+                pemain online
+              </span>
+              <span className="h-3 w-px bg-white/20" />
+              <span className="flex items-center gap-2 text-xs font-semibold text-[#FEFEEE]/90">
+                <span className="font-num text-sm font-bold text-[#f5c036]">
+                  {live.data?.activeRooms ?? "–"}
+                </span>
+                room aktif
+              </span>
+            </div>
             <div className="inline-block bg-[#FEFEEE] px-4 py-3 sm:px-6 sm:py-4">
               <h1 className="font-display text-6xl leading-[0.9] text-[#14110d] sm:text-8xl">
                 MAIN REMI,

@@ -43,18 +43,22 @@ export function RoundEndModal({
   isPlayer,
   onNext,
   pending,
+  open,
+  onClose,
 }: {
   state: ClientState;
   isPlayer: boolean;
   onNext: () => void;
   pending: boolean;
+  open: boolean;
+  onClose: () => void;
 }) {
   const r = state.roundResult;
   if (!r) return null;
   const { title, sub } = reasonTitle(state);
 
   return (
-    <Dialog open>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         className="max-h-[88vh] overflow-y-auto border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-2xl"
         onInteractOutside={(e) => e.preventDefault()}
@@ -155,18 +159,22 @@ export function GameEndModal({
   onRematch,
   onHome,
   pending,
+  open,
+  onClose,
 }: {
   state: ClientState;
   isPlayer: boolean;
   onRematch: () => void;
   onHome: () => void;
   pending: boolean;
+  open: boolean;
+  onClose: () => void;
 }) {
   const champion = state.players.find((p) => p.seat === state.winnerSeat);
   const standings = [...state.players].sort((a, b) => b.score - a.score);
 
   return (
-    <Dialog open>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         className="border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-lg"
         onInteractOutside={(e) => e.preventDefault()}
