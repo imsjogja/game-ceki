@@ -26,22 +26,26 @@ import {
 } from "lucide-react";
 
 // ----------------------------------------------------------
-// Panggung meja ber-ukuran tetap (kanvas desain) yang di-scale agar
-// selalu pas di layar — pola yang dipakai game kartu profesional.
-// Tidak ada lagi zona yang remuk/menindih di layar pendek atau sempit.
-const STAGE_W = 960;
-const STAGE_H = 620;
+// Panggung meja dengan tinggi desain tetap dan lebar yang mengikuti
+// rasio layar (dibatasi 940–1500), lalu di-scale agar memenuhi layar
+// penuh — pola yang dipakai game kartu profesional. Tidak ada lagi
+// zona yang remuk/menindih, dan tidak ada ruang layar yang terbuang.
+const STAGE_H = 640;
+const STAGE_MIN_W = 940;
+const STAGE_MAX_W = 1500;
 
-function useStageScale() {
-  const [scale, setScale] = useState(1);
+function useStage() {
+  const [stage, setStage] = useState({ w: 960, scale: 1 });
   useEffect(() => {
     const update = () => {
-      const s = Math.min(
-        window.innerWidth / STAGE_W,
-        window.innerHeight / STAGE_H,
-        1.3, // batas pembesaran di layar besar
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      // lebar panggung mengikuti rasio layar → skala mengisi penuh
+      // salah satu sumbu (lebar atau tinggi) selalu pas 100%
+      const w = Math.round(
+        Math.min(STAGE_MAX_W, Math.max(STAGE_MIN_W, (STAGE_H * vw) / vh)),
       );
-      setScale(s);
+      setStage({ w, scale: Math.min(vw / w, vh / STAGE_H) });
     };
     update();
     window.addEventListener("resize", update);
@@ -51,7 +55,7 @@ function useStageScale() {
       window.removeEventListener("orientationchange", update);
     };
   }, []);
-  return scale;
+  return stage;
 }
 
 function useNow(stepMs = 500) {
@@ -160,7 +164,7 @@ export function GameTable({ code }: { code: string }) {
   useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
-  const scale = useStageScale();
+  const stage = useStage();
 
   const roomQuery = trpc.rummy.get.useQuery(
     { code },
@@ -307,7 +311,7 @@ export function GameTable({ code }: { code: string }) {
   const n = displayHand.length;
   const mid = (n - 1) / 2;
   /** jarak antar kartu (px) — kipas lebar namun tetap rapat */
-  const fanGap = n <= 1 ? 0 : Math.max(32, Math.min(58, 850 / (n - 1)));
+  const fanGap = n <= 1 ? 0 : Math.max(34, Math.min(74, (stage.w - 190) / (n - 1)));
   /** sudut antar kartu — sebaran total ±~10° agar tidak melengkung dalam */
   const fanStep = n <= 1 ? 0 : Math.min(2.8, 28 / n);
 
@@ -315,13 +319,13 @@ export function GameTable({ code }: { code: string }) {
     <div className="flex h-dvh w-full items-center justify-center overflow-hidden bg-[#14110d]">
       <PendingPill show={anyPending} label={pendingLabel} />
 
-      {/* ===== Panggung meja: kanvas 960×620 yang di-scale fit ===== */}
+      {/* ===== Panggung meja: kanvas adaptif yang di-scale memenuhi layar ===== */}
       <div
         className="flex shrink-0 flex-col"
         style={{
-          width: STAGE_W,
+          width: stage.w,
           height: STAGE_H,
-          transform: `scale(${scale})`,
+          transform: `scale(${stage.scale})`,
           transformOrigin: "center center",
         }}
       >
@@ -625,7 +629,7 @@ export function GameTable({ code }: { code: string }) {
 
         {/* ===== Kipas tangan saya — lebar, landai, bisa diseret ===== */}
         {me && myPlayer?.hand ? (
-          <div className="relative z-30 flex h-[152px] shrink-0 flex-col items-center">
+          <div className="relative z-30 flex h-[158px] shrink-0 flex-col items-center pb-2">
             <Reorder.Group
               axis="x"
               values={displayHand}
@@ -671,7 +675,7 @@ export function GameTable({ code }: { code: string }) {
             </p>
           </div>
         ) : (
-          <div className="flex h-[152px] shrink-0 items-center justify-center">
+          <div className="flex h-[158px] shrink-0 items-center justify-center">
             <p className="text-sm text-white/40">
               Mode penonton — kamu menyaksikan meja ini secara langsung.
             </p>
