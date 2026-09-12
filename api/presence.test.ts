@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { touchRoomPresence, getLiveStats, PRESENCE_TTL_MS } from "./presence";
+import {
+  clearPlayerRoomPresence,
+  clearRoomPresence,
+  getLiveStats,
+  PRESENCE_TTL_MS,
+  touchRoomPresence,
+} from "./presence";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -46,5 +52,20 @@ describe("presence / liveStats", () => {
     const s = getLiveStats();
     expect(s.playersOnline).toBe(1);
     expect(s.activeRooms).toBe(1);
+  });
+
+  it("membersihkan pemain dan room yang sudah dimusnahkan", () => {
+    const t0 = Date.now() + 4_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    touchRoomPresence("u10", "OLD111");
+    touchRoomPresence("u11", "OLD111");
+    touchRoomPresence("u12", "LIVE22");
+    clearPlayerRoomPresence("u10", "OLD111");
+    expect(getLiveStats()).toEqual({ playersOnline: 2, activeRooms: 2 });
+
+    clearRoomPresence("OLD111");
+    expect(getLiveStats()).toEqual({ playersOnline: 1, activeRooms: 1 });
   });
 });

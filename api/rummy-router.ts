@@ -2,11 +2,18 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
-import { touchRoomPresence, getLiveStats } from "./presence";
+import {
+  clearPlayerRoomPresence,
+  clearRoomPresence,
+  getLiveStats,
+  touchRoomPresence,
+} from "./presence";
+import { destroyVoiceRoom } from "./voice-router";
 import { rooms } from "@db/schema";
 import {
   getRoomByCode,
   withRoom,
+  withRoomAndDestroyIf,
   maybeRecordMatch,
   getLeaderboard,
   getUserStats,
@@ -16,6 +23,7 @@ import {
   createRoomState,
   generateRoomCode,
   getPlayerByUser,
+  leavePlayerFromRoom,
   makePlayer,
   startRound,
   drawCard,
@@ -34,6 +42,8 @@ import {
 } from "@contracts/matchmaking";
 import {
   cancelMatchmaking,
+  clearMatchmakingForRoom,
+  clearMatchmakingForUserInRoom,
   enqueueMatchmaking,
   getMatchmakingStatus,
 } from "./queries/matchmaking";
@@ -65,6 +75,25 @@ function matchmakingError(error: unknown): never {
     code: "INTERNAL_SERVER_ERROR",
     message: "Pencarian lawan sedang bermasalah. Coba lagi.",
   });
+}
+
+async function cleanMatchmakingAfterLeave(
+  userId: number,
+  roomCode: string,
+  roomDestroyed: boolean,
+) {
+  try {
+    if (roomDestroyed) {
+      await clearMatchmakingForRoom(roomCode);
+    } else {
+      await clearMatchmakingForUserInRoom(userId, roomCode);
+    }
+  } catch {
+    // Room sudah berhasil dimutasi. Jangan menahan navigasi pemain hanya
+    // karena cleanup sekunder gagal; enqueue juga memvalidasi keanggotaan room
+    // sebelum memakai kembali tiket matched yang tersisa.
+    console.error(`Matchmaking cleanup gagal untuk room ${roomCode}.`);
+  }
 }
 
 export const rummyRouter = createRouter({
@@ -228,35 +257,38 @@ export const rummyRouter = createRouter({
   leave: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
-        const me = getPlayerByUser(state, ctx.user.id);
-        if (!me) return { ok: true };
-        if (state.status === "waiting") {
-          // keluar dari lobby: hapus & rapikan kursi
-          state.players = state.players
-            .filter((p) => p.seat !== me.seat)
-            .map((p, i) => ({ ...p, seat: i }));
-          if (state.hostSeat === me.seat) {
-            const nextHuman = state.players.find((p) => !p.isBot);
-            state.hostSeat = nextHuman ? nextHuman.seat : 0;
-          }
-          pushLog(state, `${me.name} keluar dari room`);
-        } else {
-          // keluar saat main: kursi digantikan bot agar permainan jalan terus
-          me.isBot = true;
-          me.userId = null;
-          me.avatar = null;
-          me.connected = false;
-          me.name = me.name.startsWith("Bot") ? me.name : `${me.name} (Auto)`;
-          const host = state.players.find((p) => p.seat === state.hostSeat);
-          if (host && host.isBot) {
-            const nextHuman = state.players.find((p) => !p.isBot);
-            if (nextHuman) state.hostSeat = nextHuman.seat;
-          }
-          pushLog(state, `Seorang pemain keluar — digantikan bot`);
+      try {
+        const outcome = await withRoomAndDestroyIf(
+          input.code,
+          (state) => leavePlayerFromRoom(state, ctx.user.id),
+          (_state, _room, result) => result.shouldDestroy,
+        );
+
+        if (outcome.result.didLeave) {
+          clearPlayerRoomPresence(String(ctx.user.id), input.code);
         }
+        if (outcome.destroyed) {
+          clearRoomPresence(input.code);
+          destroyVoiceRoom(input.code);
+        }
+        await cleanMatchmakingAfterLeave(
+          ctx.user.id,
+          input.code,
+          outcome.destroyed,
+        );
+
         return { ok: true };
-      });
+      } catch (error) {
+        if (!(error instanceof TRPCError) || error.code !== "NOT_FOUND") {
+          throw error;
+        }
+        // Idempoten: room mungkin sudah dihapus oleh manusia terakhir lain
+        // yang keluar pada saat hampir bersamaan. Pemain ini tetap boleh
+        // kembali ke beranda dan langsung mencari match baru.
+        clearPlayerRoomPresence(String(ctx.user.id), input.code);
+        await cleanMatchmakingAfterLeave(ctx.user.id, input.code, false);
+        return { ok: true };
+      }
     }),
 
   addBot: authedQuery

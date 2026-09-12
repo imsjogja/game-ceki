@@ -8,6 +8,43 @@ export async function getRoomByCode(code: string): Promise<Room | undefined> {
   return getDb().query.rooms.findFirst({ where: eq(rooms.code, code) });
 }
 
+export type RoomMutationOutcome<T> = {
+  result: T;
+  destroyed: boolean;
+};
+
+type DestroyPredicate<T> = (state: GameState, room: Room, result: T) => boolean;
+
+async function mutateRoom<T>(
+  code: string,
+  fn: (state: GameState, room: Room) => T | Promise<T>,
+  shouldDestroy?: DestroyPredicate<T>,
+): Promise<RoomMutationOutcome<T>> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const room = await getRoomByCode(code);
+    if (!room) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Room tidak ditemukan" });
+    }
+    const state = room.state;
+    const result = await fn(state, room);
+    const destroy = shouldDestroy?.(state, room, result) ?? false;
+    const res = destroy
+      ? await getDb()
+          .delete(rooms)
+          .where(and(eq(rooms.code, code), eq(rooms.version, room.version)))
+      : await getDb()
+          .update(rooms)
+          .set({ state, status: state.status, version: room.version + 1 })
+          .where(and(eq(rooms.code, code), eq(rooms.version, room.version)));
+    const affected = (res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 1;
+    if (affected > 0) return { result, destroyed: destroy };
+  }
+  throw new TRPCError({
+    code: "CONFLICT",
+    message: "Room sedang sibuk, coba lagi sesaat",
+  });
+}
+
 /**
  * Baca → mutasi → simpan dengan optimistic locking (kolom version).
  * Retry hingga 3x bila ada penulisan bersamaan.
@@ -16,24 +53,20 @@ export async function withRoom<T>(
   code: string,
   fn: (state: GameState, room: Room) => T | Promise<T>,
 ): Promise<T> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const room = await getRoomByCode(code);
-    if (!room) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Room tidak ditemukan" });
-    }
-    const state = room.state;
-    const result = await fn(state, room);
-    const res = await getDb()
-      .update(rooms)
-      .set({ state, status: state.status, version: room.version + 1 })
-      .where(and(eq(rooms.code, code), eq(rooms.version, room.version)));
-    const affected = (res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 1;
-    if (affected > 0) return result;
-  }
-  throw new TRPCError({
-    code: "CONFLICT",
-    message: "Room sedang sibuk, coba lagi sesaat",
-  });
+  return (await mutateRoom(code, fn)).result;
+}
+
+/**
+ * Varian `withRoom` untuk lifecycle room. Penghapusan memakai version check
+ * yang sama dengan update biasa, sehingga dua pemain yang keluar bersamaan
+ * tetap aman: pemain terakhir yang berhasil menulis akan menghapus room.
+ */
+export async function withRoomAndDestroyIf<T>(
+  code: string,
+  fn: (state: GameState, room: Room) => T | Promise<T>,
+  shouldDestroy: DestroyPredicate<T>,
+): Promise<RoomMutationOutcome<T>> {
+  return mutateRoom(code, fn, shouldDestroy);
 }
 
 /** Catat hasil pertandingan & update statistik pemain (sekali saja). */

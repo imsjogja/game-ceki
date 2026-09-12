@@ -3,9 +3,17 @@ import { useAuth } from "@/hooks/useAuth";
 import { SuitIcon } from "@/components/game/PlayingCard";
 import { LogOut } from "lucide-react";
 
-export function Logo({ size = "text-3xl" }: { size?: string }) {
-  return (
-    <Link to="/" className="flex items-center gap-1.5 select-none">
+export function Logo({
+  size = "text-3xl",
+  onHome,
+  disabled = false,
+}: {
+  size?: string;
+  onHome?: () => void;
+  disabled?: boolean;
+}) {
+  const content = (
+    <>
       <span className="flex -space-x-1">
         <SuitIcon suit="S" className="h-4 w-4 text-[#FEFEEE]" />
         <SuitIcon suit="H" className="h-4 w-4 text-[#c10328]" />
@@ -13,17 +21,44 @@ export function Logo({ size = "text-3xl" }: { size?: string }) {
       <span className={`font-display ${size} text-[#f5c036] text-gold-glow leading-none pt-0.5`}>
         REMIKU
       </span>
+    </>
+  );
+
+  if (onHome) {
+    return (
+      <button
+        type="button"
+        onClick={onHome}
+        disabled={disabled}
+        className="flex items-center gap-1.5 select-none disabled:cursor-wait disabled:opacity-60"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <Link to="/" className="flex items-center gap-1.5 select-none">
+      {content}
     </Link>
   );
 }
 
-export function SiteHeader() {
+export function SiteHeader({
+  onHome,
+  onLogout,
+  busy = false,
+}: {
+  onHome?: () => void;
+  onLogout?: () => void;
+  busy?: boolean;
+}) {
   const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
 
   return (
     <header className="relative z-20 flex items-center justify-between px-4 sm:px-8 py-4">
-      <Logo />
+      <Logo onHome={onHome} disabled={busy} />
       <div className="flex items-center gap-3">
         {isAuthenticated && user ? (
           <>
@@ -38,9 +73,10 @@ export function SiteHeader() {
               <span className="max-w-28 truncate text-sm font-medium">{user.name ?? "Pemain"}</span>
             </div>
             <button
-              onClick={() => logout()}
+              onClick={() => (onLogout ? onLogout() : logout())}
+              disabled={busy}
               title="Keluar"
-              className="rounded-full border border-dashed border-white/25 p-2 text-white/60 transition-colors hover:border-[#c10328] hover:text-[#c10328]"
+              className="rounded-full border border-dashed border-white/25 p-2 text-white/60 transition-colors hover:border-[#c10328] hover:text-[#c10328] disabled:cursor-wait disabled:opacity-60"
             >
               <LogOut className="h-4 w-4" />
             </button>

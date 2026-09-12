@@ -23,6 +23,11 @@ interface VoiceHub {
 
 const hubs = new Map<string, VoiceHub>();
 
+/** Bersihkan signaling room segera setelah room permainan dimusnahkan. */
+export function destroyVoiceRoom(code: string) {
+  hubs.delete(code);
+}
+
 function getHub(code: string): VoiceHub {
   let hub = hubs.get(code);
   if (!hub) {

@@ -34,6 +34,10 @@ type RoomStatusRow = RowDataPacket & {
   status: "waiting" | "playing" | "roundEnd" | "finished";
 };
 
+type RoomMembershipRow = RoomStatusRow & {
+  state: unknown;
+};
+
 type MatchUserRow = RowDataPacket & {
   id: number;
   name: string | null;
@@ -74,15 +78,46 @@ async function clearExpired(conn: PoolConnection) {
   );
 }
 
-async function getActiveRoomStatus(
+function roomStateHasActivePlayer(state: unknown, userId: number) {
+  let parsed = state;
+  if (Buffer.isBuffer(parsed)) parsed = parsed.toString("utf8");
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return false;
+    }
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !Array.isArray((parsed as { players?: unknown }).players)
+  ) {
+    return false;
+  }
+  return (parsed as { players: unknown[] }).players.some((player) => {
+    if (!player || typeof player !== "object") return false;
+    const value = player as { userId?: unknown; isBot?: unknown };
+    return Number(value.userId) === userId && value.isBot !== true;
+  });
+}
+
+/**
+ * Tiket `matched` hanya valid bila room masih aktif dan pemain tersebut masih
+ * tercatat sebagai manusia di state room. Validasi keanggotaan ini menjadi
+ * pengaman bila request leave terdahulu terputus sebelum tiket dihapus.
+ */
+async function isUserInActiveRoom(
   conn: PoolConnection,
   roomCode: string,
-): Promise<RoomStatusRow["status"] | null> {
-  const [rows] = await conn.execute<RoomStatusRow[]>(
-    "SELECT status FROM rooms WHERE code = ? LIMIT 1",
+  userId: number,
+): Promise<boolean> {
+  const [rows] = await conn.execute<RoomMembershipRow[]>(
+    "SELECT status, state FROM rooms WHERE code = ? LIMIT 1",
     [roomCode],
   );
-  return rows[0]?.status ?? null;
+  const room = rows[0];
+  return !!room && isActiveRoom(room.status) && roomStateHasActivePlayer(room.state, userId);
 }
 
 function isActiveRoom(status: RoomStatusRow["status"] | null) {
@@ -207,8 +242,7 @@ async function queueOrMatch(
   );
   const existing = existingRows[0];
   if (existing?.status === "matched" && existing.roomCode) {
-    const activeStatus = await getActiveRoomStatus(conn, existing.roomCode);
-    if (isActiveRoom(activeStatus)) {
+    if (await isUserInActiveRoom(conn, existing.roomCode, user.id)) {
       return { status: "matched", roomCode: existing.roomCode };
     }
     await conn.execute("DELETE FROM matchmaking_queue WHERE userId = ?", [user.id]);
@@ -314,8 +348,7 @@ export async function getMatchmakingStatus(userId: number): Promise<MatchmakingR
     }
 
     if (row.status === "matched" && row.roomCode) {
-      const activeStatus = await getActiveRoomStatus(conn, row.roomCode);
-      if (isActiveRoom(activeStatus)) {
+      if (await isUserInActiveRoom(conn, row.roomCode, userId)) {
         await conn.commit();
         return { status: "matched", roomCode: row.roomCode };
       }
@@ -354,8 +387,7 @@ export async function cancelMatchmaking(userId: number): Promise<MatchmakingResu
     );
     const row = rows[0];
     if (row?.status === "matched" && row.roomCode) {
-      const activeStatus = await getActiveRoomStatus(conn, row.roomCode);
-      if (isActiveRoom(activeStatus)) {
+      if (await isUserInActiveRoom(conn, row.roomCode, userId)) {
         await conn.commit();
         return { status: "matched", roomCode: row.roomCode };
       }
@@ -369,4 +401,27 @@ export async function cancelMatchmaking(userId: number): Promise<MatchmakingResu
   } finally {
     conn.release();
   }
+}
+
+/**
+ * Lepaskan tiket match lama milik pemain yang keluar dari room tersebut.
+ * Kondisi roomCode menjaga agar request leave yang terlambat tidak dapat
+ * menghapus antrean pertandingan baru pemain yang sama.
+ */
+export async function clearMatchmakingForUserInRoom(
+  userId: number,
+  roomCode: string,
+) {
+  await getPool().execute(
+    "DELETE FROM matchmaking_queue WHERE userId = ? AND roomCode = ?",
+    [userId, roomCode],
+  );
+}
+
+/** Hapus seluruh tiket match yang menunjuk ke room yang sudah dimusnahkan. */
+export async function clearMatchmakingForRoom(roomCode: string) {
+  await getPool().execute(
+    "DELETE FROM matchmaking_queue WHERE roomCode = ?",
+    [roomCode],
+  );
 }

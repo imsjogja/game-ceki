@@ -11,7 +11,7 @@ import {
 import { TARGET_SCORES } from "@contracts/rummy";
 
 export function Lobby({ code }: { code: string }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
@@ -70,10 +70,30 @@ export function Lobby({ code }: { code: string }) {
   };
 
   const emptySeats = state.maxPlayers - state.players.length;
+  const leaveToHome = () => {
+    if (me) leave.mutate({ code });
+    else navigate("/", { replace: true });
+  };
+  const leaveThenLogout = () => {
+    if (me) {
+      leave.mutate(
+        { code },
+        {
+          onSuccess: () => logout(),
+        },
+      );
+    } else {
+      logout();
+    }
+  };
 
   return (
     <div className="flex min-h-screen flex-col">
-      <SiteHeader />
+      <SiteHeader
+        onHome={leaveToHome}
+        onLogout={leaveThenLogout}
+        busy={leave.isPending}
+      />
 
       <main className="mx-auto w-full max-w-4xl flex-1 px-4 pb-16">
         {/* Judul room + kode */}
@@ -277,7 +297,8 @@ export function Lobby({ code }: { code: string }) {
 
           {me !== null && (
             <button
-              onClick={() => leave.mutate({ code })}
+              onClick={leaveToHome}
+              disabled={leave.isPending}
               className="btn-stitch h-10 text-base"
             >
               <LogOut className="h-4 w-4" /> KELUAR ROOM

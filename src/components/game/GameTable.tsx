@@ -303,6 +303,10 @@ export function GameTable({
     onSuccess: () => navigate("/", { replace: true }),
     onError: onErr,
   });
+  const leaveToHome = () => {
+    if (me) leave.mutate({ code });
+    else navigate("/", { replace: true });
+  };
 
   const anyPending =
     draw.isPending || meld.isPending || discard.isPending ||
@@ -423,7 +427,7 @@ export function GameTable({
       >
         {/* ===== Header meja ===== */}
         <header className="relative z-30 flex h-11 shrink-0 items-center justify-between gap-2 px-2">
-          <Logo size="text-xl" />
+          <Logo size="text-xl" onHome={leaveToHome} disabled={leave.isPending} />
           <div className="flex items-center gap-2 text-center">
             <span className="font-display text-base tracking-wide text-white/60">
               {data?.name}
@@ -479,8 +483,7 @@ export function GameTable({
               size="sm" variant="ghost"
               disabled={leave.isPending}
               onClick={() => {
-                if (me) leave.mutate({ code });
-                else navigate("/");
+                leaveToHome();
               }}
               className="h-8 gap-1.5 text-white/70 hover:text-[#c10328]"
             >
@@ -819,7 +822,7 @@ export function GameTable({
           state={state}
           isPlayer={!!me}
           onRematch={() => rematch.mutate({ code })}
-          onHome={() => navigate("/")}
+          onHome={leaveToHome}
           pending={rematch.isPending}
           open={resultOpen}
           onClose={() => setResultOpen(false)}

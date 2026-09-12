@@ -354,6 +354,56 @@ export function getPlayerByUser(state: GameState, userId: number): PlayerState |
   return state.players.find((p) => p.userId === userId);
 }
 
+/**
+ * Keluarkan pemain manusia dari sebuah room.
+ *
+ * Lobby merapikan kursi yang tersisa. Saat permainan sudah dimulai, kursi
+ * pemain diambil alih bot supaya pemain lain tetap dapat menyelesaikan sesi.
+ * `shouldDestroy` bernilai true bila tidak ada manusia yang tersisa; pemanggil
+ * harus menghapus room tersebut secara atomik dari penyimpanan.
+ */
+export function leavePlayerFromRoom(
+  state: GameState,
+  userId: number,
+): { didLeave: boolean; shouldDestroy: boolean } {
+  const me = getPlayerByUser(state, userId);
+  if (!me) {
+    return {
+      didLeave: false,
+      shouldDestroy: !state.players.some((player) => !player.isBot),
+    };
+  }
+
+  if (state.status === "waiting") {
+    state.players = state.players
+      .filter((player) => player.seat !== me.seat)
+      .map((player, seat) => ({ ...player, seat }));
+    if (state.hostSeat === me.seat) {
+      const nextHuman = state.players.find((player) => !player.isBot);
+      state.hostSeat = nextHuman ? nextHuman.seat : 0;
+    }
+    pushLog(state, `${me.name} keluar dari room`);
+  } else {
+    // Permainan yang masih memiliki pemain manusia tetap berjalan dengan bot.
+    me.isBot = true;
+    me.userId = null;
+    me.avatar = null;
+    me.connected = false;
+    me.name = me.name.startsWith("Bot") ? me.name : `${me.name} (Auto)`;
+    const host = state.players.find((player) => player.seat === state.hostSeat);
+    if (host?.isBot) {
+      const nextHuman = state.players.find((player) => !player.isBot);
+      if (nextHuman) state.hostSeat = nextHuman.seat;
+    }
+    pushLog(state, "Seorang pemain keluar — digantikan bot");
+  }
+
+  return {
+    didLeave: true,
+    shouldDestroy: !state.players.some((player) => !player.isBot),
+  };
+}
+
 // ── Siklus sesi ───────────────────────────────────────────────────
 export function startRound(state: GameState) {
   const n = state.players.length;

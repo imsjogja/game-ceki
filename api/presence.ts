@@ -40,6 +40,19 @@ export function touchRoomPresence(userKey: string | null, roomCode: string) {
   if (players.size + activeRooms.size > 500) sweep(now);
 }
 
+/** Hapus kehadiran pemain yang meninggalkan room tanpa memengaruhi room lain. */
+export function clearPlayerRoomPresence(userKey: string, roomCode: string) {
+  if (players.get(userKey)?.room === roomCode) players.delete(userKey);
+}
+
+/** Hapus seluruh state presence untuk room yang sudah tidak ada. */
+export function clearRoomPresence(roomCode: string) {
+  activeRooms.delete(roomCode);
+  for (const [userKey, presence] of players) {
+    if (presence.room === roomCode) players.delete(userKey);
+  }
+}
+
 /** Statistik live untuk landing page. */
 export function getLiveStats(): { playersOnline: number; activeRooms: number } {
   sweep(Date.now());
