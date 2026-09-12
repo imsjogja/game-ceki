@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createRouter, publicQuery, authedQuery } from "./middleware";
 import { getDb } from "./queries/connection";
+import { touchRoomPresence, getLiveStats } from "./presence";
 import { rooms } from "@db/schema";
 import {
   getRoomByCode,
@@ -325,6 +326,8 @@ export const rummyRouter = createRouter({
       return withRoom(input.code, async (state, room) => {
         // Lazy tick: gerakkan bot / timeout pemain
         tickGame(state);
+        // sinyal kehadiran untuk statistik live di landing
+        touchRoomPresence(ctx.user ? String(ctx.user.id) : null, room.code);
         await maybeRecordMatch(room, state);
         return {
           code: room.code,
@@ -388,5 +391,10 @@ export const rummyRouter = createRouter({
 
   leaderboard: publicQuery.query(async () => {
     return getLeaderboard();
+  }),
+
+  /** Statistik live: berapa pemain online & room aktif saat ini (in-memory). */
+  liveStats: publicQuery.query(() => {
+    return getLiveStats();
   }),
 });

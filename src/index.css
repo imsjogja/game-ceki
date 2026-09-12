@@ -122,6 +122,37 @@
     animation: speak-pulse 1s ease-in-out infinite;
   }
 
+  /* Busur emas berputar mengelilingi avatar pemain yang sedang giliran */
+  .turn-ring {
+    position: absolute;
+    inset: -7px;
+    border-radius: 9999px;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #f5c036 55deg,
+      #fff3c4 90deg,
+      #f5c036 125deg,
+      transparent 180deg,
+      transparent 360deg
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4.5px), #000 calc(100% - 4px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 4.5px), #000 calc(100% - 4px));
+    animation: turn-ring-spin 1.4s linear infinite;
+    pointer-events: none;
+  }
+
+  /* Lencana GILIRAN yang mengambang di atas avatar */
+  .turn-badge {
+    animation: badge-bob 1s ease-in-out infinite;
+  }
+
+  /* Banner giliranku yang berdenyut */
+  .turn-banner {
+    box-shadow: 0 0 24px 6px rgba(245, 192, 54, 0.45);
+    animation: turn-banner-pulse 1.2s ease-in-out infinite;
+  }
+
   .card-shadow {
     box-shadow:
       0 1px 2px rgba(0, 0, 0, 0.4),
@@ -159,9 +190,36 @@
   }
 }
 
+@keyframes turn-ring-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes badge-bob {
+  0%, 100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, -3px);
+  }
+}
+
+@keyframes turn-banner-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .turn-glow,
-  .speaking-glow {
+  .speaking-glow,
+  .turn-ring,
+  .turn-badge,
+  .turn-banner {
     animation: none;
   }
 }
