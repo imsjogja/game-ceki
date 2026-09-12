@@ -1,4 +1,5 @@
-import { Navigate, useParams } from "react-router";
+import { useEffect } from "react";
+import { useParams } from "react-router";
 import { trpc } from "@/providers/trpc";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Lobby } from "@/components/game/Lobby";
@@ -30,6 +31,15 @@ export default function Room() {
     avatar: myPlayer?.avatar ?? null,
     seat: me?.seat ?? null,
   });
+  const roomUnavailable = !roomQuery.isLoading && (!!roomQuery.error || !room);
+
+  // Room yang sudah dihancurkan dapat masih terbuka di tab pemain terakhir.
+  // Pakai navigasi dokumen, bukan hanya state router, agar tab yang sedang
+  // memiliki request polling lama selalu pulih ke beranda tanpa blank screen.
+  useEffect(() => {
+    if (!roomUnavailable) return;
+    window.location.replace("/");
+  }, [roomUnavailable]);
 
   if (roomQuery.isLoading) {
     return (
@@ -47,10 +57,27 @@ export default function Room() {
     );
   }
 
-  if (roomQuery.error || !room) {
-    // Room dapat menjadi tidak bisa diakses saat pemain terakhir keluar atau
-    // sesi logout. Jangan biarkan pemain tertahan pada layar room yang mati.
-    return <Navigate to="/" replace />;
+  if (roomUnavailable || !room) {
+    // Fallback terlihat selama browser memproses redirect dokumen di atas.
+    // Ini mencegah halaman room yang sudah tidak ada tampak seperti layar hitam.
+    return (
+      <div className="flex min-h-screen flex-col">
+        <SiteHeader />
+        <main className="flex flex-1 items-center justify-center px-4 text-center">
+          <div>
+            <p className="font-display text-4xl tracking-wide text-[#f5c036]">
+              ROOM SUDAH DITUTUP
+            </p>
+            <p className="mt-2 text-sm text-white/55">
+              Mengarahkan kembali ke beranda…
+            </p>
+            <a href="/" className="btn-gold mt-6 h-11 px-6 text-lg">
+              KE BERANDA
+            </a>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   // Selain status waiting, tampilkan meja permainan (pemain & penonton)
