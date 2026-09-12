@@ -162,6 +162,227 @@
   .text-gold-glow {
     text-shadow: 0 0 24px rgba(245, 192, 54, 0.45);
   }
+
+  /*
+   * Meja permainan responsive
+   *
+   * Desktop mempertahankan panggung proporsional. Di layar compact (ponsel,
+   * tablet portrait, atau jendela pendek), panggung tidak lagi dikecilkan
+   * sebagai satu gambar desktop. Setiap zona memakai ukuran viewport asli,
+   * sehingga kartu meja dan deck tetap mudah disentuh/dibaca.
+   */
+  .game-table-shell {
+    min-height: 100vh;
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+
+  .game-stage[data-compact="true"] {
+    width: 100% !important;
+    height: 100% !important;
+    transform: none !important;
+    transform-origin: center center;
+  }
+
+  .game-stage[data-compact="true"] .game-header {
+    height: 38px;
+    min-height: 38px;
+    padding-inline: max(0.5rem, env(safe-area-inset-left)) max(0.5rem, env(safe-area-inset-right));
+  }
+
+  .game-stage[data-compact="true"] .game-header-actions {
+    gap: 0.125rem;
+  }
+
+  .game-stage[data-compact="true"] .game-header-actions > button {
+    min-width: 2rem;
+    padding-inline: 0.45rem;
+  }
+
+  .game-stage[data-compact="true"] .game-felt-zone {
+    padding-inline: max(0.375rem, env(safe-area-inset-left)) max(0.375rem, env(safe-area-inset-right));
+  }
+
+  .game-stage[data-compact="true"] .game-opponents {
+    height: 72px;
+    padding: 0.35rem 1.125rem 0;
+  }
+
+  .game-stage[data-compact="true"] .game-opponent-seat {
+    width: 6.25rem;
+  }
+
+  .game-stage[data-compact="true"] .game-opponent-seat > p {
+    margin-top: 0.15rem;
+  }
+
+  .game-stage[data-compact="true"] .game-opponent-seat .turn-badge {
+    transform: translate(-50%, 2px) scale(0.82);
+    transform-origin: center;
+  }
+
+  .game-stage[data-compact="true"] .game-turn-status {
+    height: 28px;
+  }
+
+  .game-stage[data-compact="true"] .game-turn-status > span {
+    padding-inline: 0.7rem;
+    padding-block: 0.2rem;
+    font-size: 0.875rem;
+  }
+
+  .game-stage[data-compact="true"] .game-center {
+    gap: 0.75rem;
+    padding: 0.25rem 0.75rem 0.25rem;
+  }
+
+  .game-stage[data-compact="true"] .game-meld-rack {
+    padding: 0.375rem;
+  }
+
+  .game-stage[data-compact="true"] .game-meld-rack > p {
+    padding-block: 1rem;
+    font-size: 1rem;
+  }
+
+  .game-stage[data-compact="true"] .game-meld-rack .gap-2\.5 {
+    gap: 0.45rem;
+  }
+
+  .game-stage[data-compact="true"] .game-piles {
+    gap: 1rem;
+    padding-right: 0;
+  }
+
+  .game-stage[data-compact="true"] .game-pile > span {
+    font-size: 0.5625rem;
+    line-height: 0.75rem;
+  }
+
+  .game-stage[data-compact="true"] .game-action-area {
+    margin-top: 0;
+  }
+
+  .game-stage[data-compact="true"] .game-action-bar {
+    height: 40px;
+    gap: 0.375rem;
+    padding-inline: 0.5rem;
+  }
+
+  .game-stage[data-compact="true"] .game-action-bar > span,
+  .game-stage[data-compact="true"] .game-sort-control {
+    padding-block: 0.3rem;
+    padding-inline: 0.55rem;
+    font-size: 0.6875rem;
+    line-height: 0.875rem;
+  }
+
+  .game-stage[data-compact="true"] .game-turn-action {
+    height: 2rem;
+    padding-inline: 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1rem;
+  }
+
+  .game-stage[data-layout="landscape"] .game-hand-hint {
+    display: none;
+  }
+
+  .game-stage[data-layout="landscape"] .game-hand {
+    padding-bottom: 0;
+  }
+
+  /* Portrait: rack kartu jadi berada di atas deck/buangan agar semua kontrol
+     tetap dapat disentuh tanpa memaksa meja desktop diperkecil. */
+  .game-stage[data-layout="portrait"] .game-header {
+    height: 48px;
+    min-height: 48px;
+  }
+
+  .game-stage[data-layout="portrait"] .game-room-name,
+  .game-stage[data-layout="portrait"] .game-session,
+  .game-stage[data-layout="portrait"] .game-header-label {
+    display: none;
+  }
+
+  .game-stage[data-layout="portrait"] .game-room-meta {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .game-stage[data-layout="portrait"] .game-header-actions > button {
+    width: 2.1rem;
+    min-width: 2.1rem;
+    height: 2.1rem;
+    padding-inline: 0;
+  }
+
+  .game-stage[data-layout="portrait"] .game-opponents {
+    height: 88px;
+    justify-content: space-around;
+    gap: 0;
+    padding: 0.5rem 0.25rem 0;
+  }
+
+  .game-stage[data-layout="portrait"] .game-opponent-seat {
+    width: min(23vw, 5.5rem);
+  }
+
+  .game-stage[data-layout="portrait"] .game-opponent-seat .max-w-32 {
+    max-width: 5.5rem;
+  }
+
+  .game-stage[data-layout="portrait"] .game-center {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 0.25rem 0.625rem 0.5rem;
+  }
+
+  .game-stage[data-layout="portrait"] .game-meld-rack {
+    width: 100%;
+    flex: 1 1 0%;
+  }
+
+  .game-stage[data-layout="portrait"] .game-piles {
+    width: 100%;
+    align-self: center;
+    justify-content: center;
+    gap: clamp(1.25rem, 7vw, 2rem);
+    padding-top: 0.125rem;
+  }
+
+  .game-stage[data-layout="portrait"] .game-action-area {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .game-stage[data-layout="portrait"] .game-action-bar {
+    height: auto;
+    min-height: 42px;
+    align-content: center;
+    gap: 0.3rem;
+    padding-block: 0.2rem;
+  }
+
+  .game-stage[data-layout="portrait"] .game-score-detail,
+  .game-stage[data-layout="portrait"] .game-first-meld-note {
+    display: none;
+  }
+
+  .game-stage[data-layout="portrait"] .game-draw-hint {
+    max-width: 13.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .game-stage[data-layout="portrait"] .game-hand {
+    padding-bottom: 0;
+  }
+
+  .game-stage[data-layout="portrait"] .game-hand-hint {
+    margin-top: 0;
+  }
 }
 
 @keyframes turn-pulse {
