@@ -1,0 +1,50 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { touchRoomPresence, getLiveStats, PRESENCE_TTL_MS } from "./presence";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("presence / liveStats", () => {
+  it("menghitung pemain online dan room aktif", () => {
+    const t0 = Date.now() + 1_000_000; // lompatan waktu agar terisolasi
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    touchRoomPresence("u1", "ABC234");
+    touchRoomPresence("u2", "ABC234");
+    touchRoomPresence("u3", "XYZ789");
+    touchRoomPresence(null, "XYZ789"); // penonton anon: room aktif, bukan pemain
+
+    const s = getLiveStats();
+    expect(s.playersOnline).toBe(3);
+    expect(s.activeRooms).toBe(2);
+  });
+
+  it("kedaluwarsa setelah TTL tanpa aktivitas", () => {
+    const t0 = Date.now() + 2_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    touchRoomPresence("u9", "ROOM99");
+    expect(getLiveStats()).toEqual({ playersOnline: 1, activeRooms: 1 });
+
+    vi.setSystemTime(t0 + PRESENCE_TTL_MS + 1);
+    expect(getLiveStats()).toEqual({ playersOnline: 0, activeRooms: 0 });
+  });
+
+  it("sentuhan ulang memperpanjang kehadiran", () => {
+    const t0 = Date.now() + 3_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    touchRoomPresence("u5", "ROOM55");
+    vi.setSystemTime(t0 + PRESENCE_TTL_MS - 2_000);
+    touchRoomPresence("u5", "ROOM55"); // poll berikutnya
+    vi.setSystemTime(t0 + PRESENCE_TTL_MS + 1_000);
+
+    const s = getLiveStats();
+    expect(s.playersOnline).toBe(1);
+    expect(s.activeRooms).toBe(1);
+  });
+});
