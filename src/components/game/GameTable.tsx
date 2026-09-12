@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { Reorder } from "framer-motion";
 import { toast } from "sonner";
@@ -20,9 +20,10 @@ import {
   TURN_TIMEOUT_MS, type CardCode, type ClientState, type ClientPlayer,
 } from "@contracts/rummy";
 import { cn } from "@/lib/utils";
+import { playTurnChime, resumeAudio } from "@/lib/sounds";
 import {
   ScrollText, LayoutGrid, LogOut, Layers, ArrowDownToLine, Sparkles,
-  Loader2, GripVertical, ArrowUpDown, Mic, MicOff,
+  Loader2, GripVertical, ArrowUpDown, Mic, MicOff, Volume2, VolumeX,
 } from "lucide-react";
 
 // ----------------------------------------------------------
@@ -118,11 +119,17 @@ function OpponentSeat({
       <div className="flex items-center gap-2">
         <div
           className={cn(
-            "relative rounded-full",
-            isTurn && "turn-glow",
+            "relative rounded-full transition-transform duration-300",
+            isTurn && "turn-glow scale-110",
             voice?.speaking && !voice.muted && "speaking-glow",
           )}
         >
+          {isTurn && <span className="turn-ring" aria-hidden />}
+          {isTurn && (
+            <span className="turn-badge absolute -top-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#f5c036] px-1.5 py-px font-display text-[9px] tracking-[0.2em] text-[#1a150a] shadow-md">
+              GILIRAN
+            </span>
+          )}
           {player.avatar ? (
             <img src={player.avatar} alt="" className="h-10 w-10 rounded-full object-cover ring-2 ring-black/40" />
           ) : (
@@ -173,7 +180,12 @@ function OpponentSeat({
           </span>
         </div>
       </div>
-      <p className="mt-1 max-w-32 truncate text-[11px] font-semibold text-[#FEFEEE]">
+      <p
+        className={cn(
+          "mt-1 max-w-32 truncate text-[11px] font-semibold",
+          isTurn ? "text-[#f5c036]" : "text-[#FEFEEE]",
+        )}
+      >
         {player.name}
         {player.isBot && <span className="ml-1 text-[8px] text-white/40">BOT</span>}
       </p>
@@ -212,11 +224,56 @@ export function GameTable({
   const [manualOrder, setManualOrder] = useState<CardCode[] | null>(null);
   const [scoreOpen, setScoreOpen] = useState(false);
   const [jokerConfirm, setJokerConfirm] = useState<CardCode | null>(null);
+  const [resultOpen, setResultOpen] = useState(true);
+  const [soundOn, setSoundOn] = useState(() => {
+    try {
+      return localStorage.getItem("remiku:sound") !== "off";
+    } catch {
+      return true;
+    }
+  });
 
   const state = data?.state;
   const me = state?.you ?? null;
   const myTurn = !!state && !!me && state.status === "playing" && state.turnSeat === me.seat;
   const phase = state?.phase;
+
+  // modal hasil selalu terbuka otomatis setiap kali sesi/permainan berakhir
+  useEffect(() => {
+    if (state?.status === "roundEnd" || state?.status === "finished") {
+      setResultOpen(true);
+    }
+  }, [state?.status, state?.round]);
+
+  // buka kunci AudioContext pada gestur pertama (kebijakan autoplay browser)
+  useEffect(() => {
+    const unlock = () => resumeAudio();
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  // lonceng saat giliran menjadi milikku
+  const prevMyTurnRef = useRef(false);
+  useEffect(() => {
+    if (myTurn && !prevMyTurnRef.current && soundOn) playTurnChime();
+    prevMyTurnRef.current = myTurn;
+  }, [myTurn, soundOn]);
+
+  const toggleSound = () => {
+    setSoundOn((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("remiku:sound", next ? "on" : "off");
+      } catch {
+        /* penyimpanan tak tersedia */
+      }
+      return next;
+    });
+  };
 
   // bersihkan seleksi saat giliran/fase berubah
   useEffect(() => {
@@ -381,6 +438,15 @@ export function GameTable({
           <div className="flex items-center gap-1.5">
             <Button
               size="sm" variant="ghost"
+              onClick={toggleSound}
+              title={soundOn ? "Matikan suara notifikasi" : "Nyalakan suara notifikasi"}
+              className={cn("h-8 gap-1.5", soundOn ? "text-[#f5c036]" : "text-white/40 hover:text-white/70")}
+            >
+              {soundOn ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              Suara
+            </Button>
+            <Button
+              size="sm" variant="ghost"
               onClick={() => setScoreOpen(true)}
               className="h-8 gap-1.5 text-white/70 hover:text-[#f5c036]"
             >
@@ -437,7 +503,7 @@ export function GameTable({
           </div>
 
           {/* baris lawan — jalur tetap, tak pernah menindih */}
-          <div className="relative z-10 flex h-[92px] shrink-0 items-start justify-around gap-2 px-10 pt-2">
+          <div className="relative z-10 flex h-[96px] shrink-0 items-start justify-around gap-2 px-10 pt-4">
             {others.map((p) => (
               <OpponentSeat
                 key={p.seat}
@@ -456,7 +522,7 @@ export function GameTable({
               </span>
             )}
             {state.status === "playing" && myTurn && (
-              <span className="rounded-full bg-[#f5c036] px-4 py-1 font-display text-base tracking-wide text-[#1a150a] shadow-lg">
+              <span className="turn-banner rounded-full bg-[#f5c036] px-4 py-1 font-display text-base tracking-wide text-[#1a150a]">
                 {phase === "draw" ? "GILIRANMU — AMBIL KARTU" : "BUKA KOMBINASI, LALU BUANG"}
               </span>
             )}
@@ -672,7 +738,17 @@ export function GameTable({
 
         {/* ===== Kipas tangan saya — kartu besar, lebar, bisa diseret ===== */}
         {me && myPlayer?.hand ? (
-          <div className="flex h-[204px] flex-col items-center pb-2">
+          <div className="relative flex h-[204px] flex-col items-center pb-2">
+            {myTurn && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-x-[8%] -top-2 bottom-0 animate-pulse"
+                style={{
+                  background:
+                    "radial-gradient(ellipse 55% 85% at 50% 95%, rgba(245,192,54,0.22), transparent 70%)",
+                }}
+              />
+            )}
             <Reorder.Group
               axis="x"
               values={displayHand}
@@ -734,6 +810,8 @@ export function GameTable({
           isPlayer={!!me}
           onNext={() => nextRound.mutate({ code })}
           pending={nextRound.isPending}
+          open={resultOpen}
+          onClose={() => setResultOpen(false)}
         />
       )}
       {state.status === "finished" && (
@@ -743,7 +821,18 @@ export function GameTable({
           onRematch={() => rematch.mutate({ code })}
           onHome={() => navigate("/")}
           pending={rematch.isPending}
+          open={resultOpen}
+          onClose={() => setResultOpen(false)}
         />
+      )}
+      {/* tombol buka ulang saat modal hasil ditutup */}
+      {(state.status === "roundEnd" || state.status === "finished") && !resultOpen && (
+        <button
+          onClick={() => setResultOpen(true)}
+          className="btn-gold fixed left-1/2 top-14 z-40 h-10 -translate-x-1/2 px-5 text-sm"
+        >
+          LIHAT HASIL {state.status === "finished" ? "AKHIR" : "SESI"}
+        </button>
       )}
       <ScoreboardDialog state={state} open={scoreOpen} onClose={() => setScoreOpen(false)} />
 
