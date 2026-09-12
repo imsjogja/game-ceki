@@ -1,13 +1,17 @@
 /**
  * Pelacak kehadiran in-memory — siapa yang sedang online di meja.
  *
- * Permainan mem-poll `rummy.get` tiap ~1,2 detik dari lobby & meja, jadi
- * setiap poll sekaligus menjadi sinyal "masih di sini". Data ini ephemeral
- * (tidak disimpan ke DB) dan hanya dipakai untuk statistik live di landing.
+ * Gateway WebSocket game menyentuh presence ketika subscribe, broadcast
+ * snapshot, atau menerima pong heartbeat. Data ini ephemeral (tidak disimpan
+ * ke DB) dan hanya dipakai untuk statistik live di landing.
  */
 
-/** Dianggap online jika terlihat dalam 12 detik terakhir (poll tiap 1,2 dtk). */
-export const PRESENCE_TTL_MS = 12_000;
+/**
+ * Gateway mengirim ping WebSocket setiap 10 detik. TTL sengaja lebih longgar
+ * dari satu interval agar lonjakan event loop singkat tidak membuat statistik
+ * live berkedip menjadi offline.
+ */
+export const PRESENCE_TTL_MS = 30_000;
 
 interface PlayerPresence {
   t: number;
@@ -29,8 +33,9 @@ function sweep(now: number) {
 }
 
 /**
- * Catat aktivitas sebuah room (dipanggil dari rummy.get).
- * `userKey` null untuk penonton yang belum masuk — room tetap dihitung aktif.
+ * Catat aktivitas sebuah room.
+ * `userKey` null untuk penonton — room tetap dihitung aktif, tetapi tidak
+ * menambah hitungan pemain manusia online.
  */
 export function touchRoomPresence(userKey: string | null, roomCode: string) {
   const now = Date.now();

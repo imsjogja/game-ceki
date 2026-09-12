@@ -8,12 +8,17 @@ import {
   getLiveStats,
   touchRoomPresence,
 } from "./presence";
+import {
+  destroyGameRoom,
+  disconnectGameUser,
+  publishGameRoom,
+  scheduleGameRoom,
+} from "./game-router";
 import { destroyVoiceRoom, disconnectVoiceUser } from "./voice-router";
 import { rooms } from "@db/schema";
 import {
   getRoomByCode,
   withRoom,
-  withRoomIfChanged,
   withRoomAndDestroyIf,
   maybeRecordMatch,
   getLeaderboard,
@@ -30,7 +35,6 @@ import {
   drawCard,
   meldCards,
   discardCard,
-  tickGame,
   sanitizeState,
   pushLog,
   BOT_NAMES,
@@ -59,7 +63,7 @@ const codeSchema = z
   .regex(/^[A-Z2-9]{6}$/, "Kode room harus 6 karakter");
 
 function assertHost(state: GameState, userId: number) {
-  const host = state.players.find((p) => p.seat === state.hostSeat);
+  const host = state.players.find(p => p.seat === state.hostSeat);
   if (!host || host.userId !== userId) {
     throw new TRPCError({
       code: "FORBIDDEN",
@@ -81,7 +85,7 @@ function matchmakingError(error: unknown): never {
 async function cleanMatchmakingAfterLeave(
   userId: number,
   roomCode: string,
-  roomDestroyed: boolean,
+  roomDestroyed: boolean
 ) {
   try {
     if (roomDestroyed) {
@@ -97,6 +101,28 @@ async function cleanMatchmakingAfterLeave(
   }
 }
 
+/**
+ * State room berubah lewat tRPC; kabarkan snapshot ke semua subscriber lalu
+ * jadwalkan bot/timeout berikutnya tanpa menunggu browser mem-poll.
+ *
+ * Kegagalan socket/scheduler tidak boleh membatalkan mutasi DB yang sudah
+ * otoritatif. Reconnect client dan rehydrate scheduler akan memulihkan state.
+ */
+async function synchronizeRealtimeRoom(roomCode: string) {
+  const results = await Promise.allSettled([
+    publishGameRoom(roomCode),
+    scheduleGameRoom(roomCode),
+  ]);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error(
+        `[game] sinkronisasi realtime room ${roomCode} gagal:`,
+        result.reason
+      );
+    }
+  }
+}
+
 export const rummyRouter = createRouter({
   matchmaking: createRouter({
     enqueue: authedQuery
@@ -105,21 +131,25 @@ export const rummyRouter = createRouter({
           opponents: z
             .number()
             .int()
-            .refine((n) =>
-              (ONLINE_OPPONENT_COUNTS as readonly number[]).includes(n),
+            .refine(n =>
+              (ONLINE_OPPONENT_COUNTS as readonly number[]).includes(n)
             ),
           targetScore: z
             .number()
-            .refine((n) => (TARGET_SCORES as readonly number[]).includes(n)),
-        }),
+            .refine(n => (TARGET_SCORES as readonly number[]).includes(n)),
+        })
       )
       .mutation(async ({ ctx, input }) => {
         try {
-          return await enqueueMatchmaking(
+          const result = await enqueueMatchmaking(
             ctx.user,
             input.opponents as OnlineOpponentCount,
-            input.targetScore,
+            input.targetScore
           );
+          if (result.status === "matched") {
+            await synchronizeRealtimeRoom(result.roomCode);
+          }
+          return result;
         } catch (error) {
           return matchmakingError(error);
         }
@@ -148,11 +178,11 @@ export const rummyRouter = createRouter({
       z.object({
         targetScore: z
           .number()
-          .refine((n) => (TARGET_SCORES as readonly number[]).includes(n))
+          .refine(n => (TARGET_SCORES as readonly number[]).includes(n))
           .default(500),
         maxPlayers: z.number().min(2).max(4).default(4),
         name: z.string().trim().max(48).optional(),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       let code = generateRoomCode();
@@ -169,14 +199,17 @@ export const rummyRouter = createRouter({
         matchType: "private",
       });
       pushLog(state, `${ctx.user.name ?? "Pemain"} membuat room`);
-      await getDb().insert(rooms).values({
-        code,
-        name: input.name || `Meja ${ctx.user.name ?? "Pemain"}`,
-        status: "waiting",
-        targetScore: input.targetScore,
-        hostUserId: ctx.user.id,
-        state,
-      });
+      await getDb()
+        .insert(rooms)
+        .values({
+          code,
+          name: input.name || `Meja ${ctx.user.name ?? "Pemain"}`,
+          status: "waiting",
+          targetScore: input.targetScore,
+          hostUserId: ctx.user.id,
+          state,
+        });
+      await synchronizeRealtimeRoom(code);
       return { code };
     }),
 
@@ -187,9 +220,9 @@ export const rummyRouter = createRouter({
         bots: z.number().int().min(1).max(3).default(1),
         targetScore: z
           .number()
-          .refine((n) => (TARGET_SCORES as readonly number[]).includes(n))
+          .refine(n => (TARGET_SCORES as readonly number[]).includes(n))
           .default(250),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
       let code = generateRoomCode();
@@ -213,26 +246,29 @@ export const rummyRouter = createRouter({
             name: BOT_NAMES[i % BOT_NAMES.length],
             avatar: null,
             isBot: true,
-          }),
+          })
         );
       }
       startRound(state);
       pushLog(state, `Duel vs ${input.bots} bot dimulai`);
-      await getDb().insert(rooms).values({
-        code,
-        name: `${ctx.user.name ?? "Pemain"} vs Bot`,
-        status: "playing",
-        targetScore: input.targetScore,
-        hostUserId: ctx.user.id,
-        state,
-      });
+      await getDb()
+        .insert(rooms)
+        .values({
+          code,
+          name: `${ctx.user.name ?? "Pemain"} vs Bot`,
+          status: "playing",
+          targetScore: input.targetScore,
+          hostUserId: ctx.user.id,
+          state,
+        });
+      await synchronizeRealtimeRoom(code);
       return { code };
     }),
 
   join: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, state => {
         const existing = getPlayerByUser(state, ctx.user.id);
         if (existing) return { seat: existing.seat, already: true };
         if (state.status !== "waiting")
@@ -253,6 +289,8 @@ export const rummyRouter = createRouter({
         pushLog(state, `${ctx.user.name ?? "Pemain"} bergabung`);
         return { seat: player.seat, already: false };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   leave: authedQuery
@@ -261,22 +299,26 @@ export const rummyRouter = createRouter({
       try {
         const outcome = await withRoomAndDestroyIf(
           input.code,
-          (state) => leavePlayerFromRoom(state, ctx.user.id),
-          (_state, _room, result) => result.shouldDestroy,
+          state => leavePlayerFromRoom(state, ctx.user.id),
+          (_state, _room, result) => result.shouldDestroy
         );
 
         if (outcome.result.didLeave) {
           clearPlayerRoomPresence(String(ctx.user.id), input.code);
           disconnectVoiceUser(input.code, ctx.user.id);
+          disconnectGameUser(input.code, ctx.user.id);
         }
         if (outcome.destroyed) {
           clearRoomPresence(input.code);
           destroyVoiceRoom(input.code);
+          destroyGameRoom(input.code);
+        } else if (outcome.result.didLeave) {
+          await synchronizeRealtimeRoom(input.code);
         }
         await cleanMatchmakingAfterLeave(
           ctx.user.id,
           input.code,
-          outcome.destroyed,
+          outcome.destroyed
         );
 
         return { ok: true };
@@ -290,6 +332,7 @@ export const rummyRouter = createRouter({
           // kembali ke beranda dan langsung mencari match baru.
           clearPlayerRoomPresence(String(ctx.user.id), input.code);
           disconnectVoiceUser(input.code, ctx.user.id);
+          disconnectGameUser(input.code, ctx.user.id);
           await cleanMatchmakingAfterLeave(ctx.user.id, input.code, false);
           return { ok: true };
         }
@@ -299,13 +342,17 @@ export const rummyRouter = createRouter({
           // menghancurkan room, perlakukan leave sebagai sukses agar UI tidak
           // tertahan pada URL room yang sudah mati.
           const currentRoom = await getRoomByCode(input.code);
-          if (!currentRoom || !getPlayerByUser(currentRoom.state, ctx.user.id)) {
+          if (
+            !currentRoom ||
+            !getPlayerByUser(currentRoom.state, ctx.user.id)
+          ) {
             clearPlayerRoomPresence(String(ctx.user.id), input.code);
             disconnectVoiceUser(input.code, ctx.user.id);
+            disconnectGameUser(input.code, ctx.user.id);
             await cleanMatchmakingAfterLeave(
               ctx.user.id,
               input.code,
-              !currentRoom,
+              !currentRoom
             );
             return { ok: true };
           }
@@ -317,15 +364,19 @@ export const rummyRouter = createRouter({
   addBot: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, state => {
         assertHost(state, ctx.user.id);
         if (state.status !== "waiting")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan sudah dimulai" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Permainan sudah dimulai",
+          });
         if (state.players.length >= state.maxPlayers)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Kursi penuh" });
-        const used = new Set(state.players.map((p) => p.name));
+        const used = new Set(state.players.map(p => p.name));
         const name =
-          BOT_NAMES.find((n) => !used.has(n)) ?? `Bot ${state.players.length + 1}`;
+          BOT_NAMES.find(n => !used.has(n)) ??
+          `Bot ${state.players.length + 1}`;
         state.players.push(
           makePlayer({
             seat: state.players.length,
@@ -333,26 +384,34 @@ export const rummyRouter = createRouter({
             name,
             avatar: null,
             isBot: true,
-          }),
+          })
         );
         pushLog(state, `${name} bergabung`);
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   removePlayer: authedQuery
     .input(z.object({ code: codeSchema, seat: z.number().int().min(0).max(3) }))
     .mutation(async ({ ctx, input }) => {
-      const result = await withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, state => {
         assertHost(state, ctx.user.id);
         if (state.status !== "waiting")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan sudah dimulai" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Permainan sudah dimulai",
+          });
         if (input.seat === state.hostSeat)
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Host tidak bisa dikeluarkan" });
-        const target = state.players.find((p) => p.seat === input.seat);
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Host tidak bisa dikeluarkan",
+          });
+        const target = state.players.find(p => p.seat === input.seat);
         if (!target) return { removedUserId: null };
         state.players = state.players
-          .filter((p) => p.seat !== input.seat)
+          .filter(p => p.seat !== input.seat)
           .map((p, i) => ({ ...p, seat: i }));
         state.hostSeat = 0;
         pushLog(state, `${target.name} dikeluarkan dari room`);
@@ -361,7 +420,9 @@ export const rummyRouter = createRouter({
       if (result.removedUserId !== null) {
         clearPlayerRoomPresence(String(result.removedUserId), input.code);
         disconnectVoiceUser(input.code, result.removedUserId);
+        disconnectGameUser(input.code, result.removedUserId);
       }
+      await synchronizeRealtimeRoom(input.code);
       return { ok: true };
     }),
 
@@ -371,54 +432,80 @@ export const rummyRouter = createRouter({
         code: codeSchema,
         targetScore: z
           .number()
-          .refine((n) => (TARGET_SCORES as readonly number[]).includes(n)),
-      }),
+          .refine(n => (TARGET_SCORES as readonly number[]).includes(n)),
+      })
     )
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, state => {
         assertHost(state, ctx.user.id);
         if (state.status !== "waiting")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan sudah dimulai" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Permainan sudah dimulai",
+          });
         state.targetScore = input.targetScore;
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   start: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      const result = await withRoom(input.code, async (state, room) => {
         assertHost(state, ctx.user.id);
         if (state.status !== "waiting")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan sudah berjalan" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Permainan sudah berjalan",
+          });
         startRound(state);
         await maybeRecordMatch(room, state);
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   nextRound: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      const result = await withRoom(input.code, async (state, room) => {
         const me = getPlayerByUser(state, ctx.user.id);
-        if (!me) throw new TRPCError({ code: "FORBIDDEN", message: "Kamu bukan pemain room ini" });
+        if (!me)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Kamu bukan pemain room ini",
+          });
         if (state.status !== "roundEnd")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Sesi belum selesai" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Sesi belum selesai",
+          });
         startRound(state);
         await maybeRecordMatch(room, state);
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   rematch: authedQuery
     .input(z.object({ code: codeSchema }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, state => {
         const me = getPlayerByUser(state, ctx.user.id);
-        if (!me) throw new TRPCError({ code: "FORBIDDEN", message: "Kamu bukan pemain room ini" });
+        if (!me)
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Kamu bukan pemain room ini",
+          });
         if (state.status !== "finished")
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan belum selesai" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Permainan belum selesai",
+          });
         // reset ke lobby dengan pemain yang sama
         state.status = "waiting";
         state.matchType = "private";
@@ -432,7 +519,7 @@ export const rummyRouter = createRouter({
         state.winnerSeat = null;
         state.statsRecorded = false;
         state.botActionAt = 0;
-        const human = state.players.filter((p) => !p.isBot);
+        const human = state.players.filter(p => !p.isBot);
         state.hostSeat = human.length > 0 ? human[0].seat : 0;
         for (const p of state.players) {
           p.hand = [];
@@ -443,39 +530,45 @@ export const rummyRouter = createRouter({
         pushLog(state, "Rematch — kembali ke lobby");
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
-  // ---------- State (polling) ----------
+  // ---------- Snapshot awal / fallback reconnect ----------
   get: publicQuery
     .input(z.object({ code: codeSchema }))
     .query(async ({ ctx, input }) => {
-      return withRoomIfChanged(input.code, async (state, room) => {
-        if (
-          state.matchType === "stranger" &&
-          !getPlayerByUser(state, ctx.user?.id ?? -1)
-        ) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Room lawan online hanya dapat diakses oleh pesertanya.",
-          });
-        }
-        // Lazy tick: gerakkan bot / timeout pemain
-        const gameChanged = tickGame(state);
-        // sinyal kehadiran untuk statistik live di landing
-        touchRoomPresence(ctx.user ? String(ctx.user.id) : null, room.code);
-        // Hasil hanya tercatat satu kali. Bila status finished berasal dari
-        // aksi bot pada tick ini, perubahan `statsRecorded` ikut disimpan.
-        const needsMatchRecord = state.status === "finished" && !state.statsRecorded;
-        await maybeRecordMatch(room, state);
-        return {
-          changed: gameChanged || needsMatchRecord,
-          result: {
-            code: room.code,
-            name: room.name,
-            state: sanitizeState(state, ctx.user?.id ?? null),
-          },
-        };
-      });
+      const room = await getRoomByCode(input.code);
+      if (!room) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Room tidak ditemukan",
+        });
+      }
+      if (
+        room.state.matchType === "stranger" &&
+        !getPlayerByUser(room.state, ctx.user?.id ?? -1)
+      ) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Room lawan online hanya dapat diakses oleh pesertanya.",
+        });
+      }
+      const player = ctx.user
+        ? getPlayerByUser(room.state, ctx.user.id)
+        : undefined;
+      touchRoomPresence(
+        player && !player.isBot ? String(ctx.user!.id) : null,
+        room.code
+      );
+      // Fallback aman bila server baru aktif sebelum rehydrate scheduler selesai.
+      void scheduleGameRoom(room.code);
+      return {
+        code: room.code,
+        version: room.version,
+        name: room.name,
+        state: sanitizeState(room.state, ctx.user?.id ?? null),
+      };
     }),
 
   // ---------- Aksi permainan ----------
@@ -485,24 +578,30 @@ export const rummyRouter = createRouter({
         code: codeSchema,
         from: z.enum(["stock", "discard"]),
         depth: z.number().int().min(0).max(6).default(0),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      const result = await withRoom(input.code, async (state, room) => {
         const cards = drawCard(state, ctx.user.id, input.from, input.depth);
         await maybeRecordMatch(room, state);
         return { cards };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   meld: authedQuery
-    .input(z.object({ code: codeSchema, cards: z.array(cardSchema).min(3).max(13) }))
+    .input(
+      z.object({ code: codeSchema, cards: z.array(cardSchema).min(3).max(13) })
+    )
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      const result = await withRoom(input.code, async (state, room) => {
         const meld = meldCards(state, ctx.user.id, input.cards as never);
         await maybeRecordMatch(room, state);
         return { meldId: meld.id };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   discard: authedQuery
@@ -511,14 +610,16 @@ export const rummyRouter = createRouter({
         code: codeSchema,
         card: cardSchema,
         faceDown: z.boolean().default(false),
-      }),
+      })
     )
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      const result = await withRoom(input.code, async (state, room) => {
         discardCard(state, ctx.user.id, input.card as never, input.faceDown);
         await maybeRecordMatch(room, state);
         return { ok: true };
       });
+      await synchronizeRealtimeRoom(input.code);
+      return result;
     }),
 
   // ---------- Statistik ----------

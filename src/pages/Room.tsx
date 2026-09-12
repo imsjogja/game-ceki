@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { useParams } from "react-router";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Lobby } from "@/components/game/Lobby";
 import { GameTable } from "@/components/game/GameTable";
 import { VoiceControls } from "@/components/game/VoiceControls";
+import { useGameRoom } from "@/hooks/useGameRoom";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 
 export default function Room() {
@@ -14,21 +15,36 @@ export default function Room() {
   const roomQuery = trpc.rummy.get.useQuery(
     { code: roomCode },
     {
-      refetchInterval: 1200,
       retry: false,
-      refetchOnWindowFocus: true,
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
     }
   );
 
+  const realtime = useGameRoom({
+    code: roomCode,
+  });
+
   // Voice chat WebRTC P2P dengan signaling WebSocket event-driven.
-  const room = roomQuery.data;
+  // Query HTTP adalah snapshot awal/fallback. Jangan biarkan snapshot WS
+  // lama menimpa respons HTTP yang sudah memiliki version room lebih baru
+  // ketika keduanya selesai hampir bersamaan saat halaman dibuka.
+  const room =
+    realtime.room?.code === roomCode &&
+    (!roomQuery.data || realtime.room.version >= roomQuery.data.version)
+      ? realtime.room
+      : roomQuery.data;
   const state = room?.state;
   const me = state?.you ?? null;
   const voice = useVoiceChat({
     code: roomCode,
     seat: me?.seat ?? null,
   });
-  const roomUnavailable = !roomQuery.isLoading && (!!roomQuery.error || !room);
+  const roomUnavailable =
+    !room &&
+    (roomQuery.error !== null ||
+      realtime.error !== null ||
+      (!roomQuery.isLoading && !realtime.isConnecting));
   const canUseVoice = me !== null && state?.matchType !== "stranger";
 
   // Room yang sudah dihancurkan dapat masih terbuka di tab pemain terakhir.
@@ -39,7 +55,7 @@ export default function Room() {
     window.location.replace("/");
   }, [roomUnavailable]);
 
-  if (roomQuery.isLoading) {
+  if (!room && (roomQuery.isLoading || realtime.isConnecting)) {
     return (
       <div className="flex min-h-screen flex-col">
         <SiteHeader />

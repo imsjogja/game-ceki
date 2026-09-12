@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Logo } from "@/components/SiteHeader";
 import { SuitIcon } from "@/components/game/PlayingCard";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Ghost } from "lucide-react";

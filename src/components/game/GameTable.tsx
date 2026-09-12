@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { useNavigate } from "react-router";
 import { Reorder } from "framer-motion";
 import { toast } from "sonner";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { PlayingCard, SuitIcon } from "@/components/game/PlayingCard";
 import { RoundEndModal, GameEndModal, ScoreboardDialog } from "@/components/game/modals";
@@ -34,6 +34,7 @@ import {
 const STAGE_H = 640;
 const STAGE_MIN_W = 940;
 const STAGE_MAX_W = 1500;
+const EMPTY_SELECTION: CardCode[] = [];
 
 function useStage() {
   const [stage, setStage] = useState({ w: 960, scale: 1 });
@@ -60,7 +61,7 @@ function useStage() {
 }
 
 function useNow(stepMs = 500) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), stepMs);
     return () => clearInterval(id);
@@ -212,15 +213,29 @@ export function GameTable({
 }) {
   useAuth();
   const navigate = useNavigate();
-  const utils = trpc.useUtils();
   const stage = useStage();
+  const state = room.state;
+  const me = state.you;
+  const myTurn = !!me && state.status === "playing" && state.turnSeat === me.seat;
+  const phase = state.phase;
+  const selectionContext = `${state.round}:${state.turnSeat}:${phase}:${state.status}`;
+  const resultKey =
+    state.status === "roundEnd" || state.status === "finished"
+      ? `${state.status}:${state.round}`
+      : null;
 
-  const [selected, setSelected] = useState<CardCode[]>([]);
+  const [selectionState, setSelectionState] = useState(() => ({
+    context: selectionContext,
+    cards: EMPTY_SELECTION,
+  }));
   const [sortMode, setSortMode] = useState<"rank" | "suit">("rank");
-  const [manualOrder, setManualOrder] = useState<CardCode[] | null>(null);
+  const [manualOrderState, setManualOrderState] = useState(() => ({
+    round: state.round,
+    cards: null as CardCode[] | null,
+  }));
   const [scoreOpen, setScoreOpen] = useState(false);
   const [jokerConfirm, setJokerConfirm] = useState<CardCode | null>(null);
-  const [resultOpen, setResultOpen] = useState(true);
+  const [dismissedResultKey, setDismissedResultKey] = useState<string | null>(null);
   const [soundOn, setSoundOn] = useState(() => {
     try {
       return localStorage.getItem("remiku:sound") !== "off";
@@ -229,17 +244,35 @@ export function GameTable({
     }
   });
 
-  const state = room.state;
-  const me = state.you;
-  const myTurn = !!me && state.status === "playing" && state.turnSeat === me.seat;
-  const phase = state.phase;
+  // Seleksi dan urutan kartu berlaku hanya untuk snapshot sesi saat ini.
+  // Menurunkan nilainya dari state room mencegah satu frame pilihan lama
+  // terlihat saat snapshot realtime berpindah fase, giliran, atau sesi.
+  const selected =
+    selectionState.context === selectionContext
+      ? selectionState.cards
+      : EMPTY_SELECTION;
+  const updateSelected = (next: SetStateAction<CardCode[]>) => {
+    setSelectionState((current) => {
+      const cards =
+        current.context === selectionContext ? current.cards : EMPTY_SELECTION;
+      return {
+        context: selectionContext,
+        cards: typeof next === "function" ? next(cards) : next,
+      };
+    });
+  };
 
-  // modal hasil selalu terbuka otomatis setiap kali sesi/permainan berakhir
-  useEffect(() => {
-    if (state?.status === "roundEnd" || state?.status === "finished") {
-      setResultOpen(true);
-    }
-  }, [state?.status, state?.round]);
+  const manualOrder =
+    manualOrderState.round === state.round ? manualOrderState.cards : null;
+  const setManualOrder = (cards: CardCode[] | null) => {
+    setManualOrderState({ round: state.round, cards });
+  };
+
+  // Modal hasil terbuka untuk setiap status akhir yang baru dan tetap dapat
+  // ditutup pengguna tanpa effect yang memicu render berantai.
+  const resultOpen =
+    resultKey !== null && dismissedResultKey !== resultKey;
+  const closeResult = () => setDismissedResultKey(resultKey);
 
   // buka kunci AudioContext pada gestur pertama (kebijakan autoplay browser)
   useEffect(() => {
@@ -271,30 +304,19 @@ export function GameTable({
     });
   };
 
-  // bersihkan seleksi saat giliran/fase berubah
-  useEffect(() => {
-    setSelected([]);
-  }, [state?.turnSeat, state?.phase, state?.status]);
-
-  // urutan manual direset tiap sesi baru
-  useEffect(() => {
-    setManualOrder(null);
-  }, [state?.round]);
-
-  const invalidate = () => utils.rummy.get.invalidate({ code });
   const onErr = (e: { message: string }) => toast.error(e.message);
 
-  const draw = trpc.rummy.draw.useMutation({ onSuccess: invalidate, onError: onErr });
+  const draw = trpc.rummy.draw.useMutation({ onError: onErr });
   const meld = trpc.rummy.meld.useMutation({
-    onSuccess: () => { setSelected([]); invalidate(); },
+    onSuccess: () => updateSelected([]),
     onError: onErr,
   });
   const discard = trpc.rummy.discard.useMutation({
-    onSuccess: () => { setSelected([]); invalidate(); },
+    onSuccess: () => updateSelected([]),
     onError: onErr,
   });
-  const nextRound = trpc.rummy.nextRound.useMutation({ onSuccess: invalidate, onError: onErr });
-  const rematch = trpc.rummy.rematch.useMutation({ onSuccess: invalidate, onError: onErr });
+  const nextRound = trpc.rummy.nextRound.useMutation({ onError: onErr });
+  const rematch = trpc.rummy.rematch.useMutation({ onError: onErr });
   const leave = trpc.rummy.leave.useMutation({
     onSuccess: () => navigate("/", { replace: true }),
     onError: onErr,
@@ -360,7 +382,7 @@ export function GameTable({
 
   const toggleSelect = (c: CardCode) => {
     if (!myTurn || phase !== "play") return;
-    setSelected((prev) =>
+    updateSelected((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
     );
   };
@@ -808,7 +830,7 @@ export function GameTable({
           onNext={() => nextRound.mutate({ code })}
           pending={nextRound.isPending}
           open={resultOpen}
-          onClose={() => setResultOpen(false)}
+          onClose={closeResult}
         />
       )}
       {state.status === "finished" && (
@@ -820,13 +842,13 @@ export function GameTable({
           pending={rematch.isPending}
           homePending={leave.isPending}
           open={resultOpen}
-          onClose={() => setResultOpen(false)}
+          onClose={closeResult}
         />
       )}
       {/* tombol buka ulang saat modal hasil ditutup */}
       {(state.status === "roundEnd" || state.status === "finished") && !resultOpen && (
         <button
-          onClick={() => setResultOpen(true)}
+          onClick={() => setDismissedResultKey(null)}
           className="btn-gold fixed left-1/2 top-14 z-40 h-10 -translate-x-1/2 px-5 text-sm"
         >
           LIHAT HASIL {state.status === "finished" ? "AKHIR" : "SESI"}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { trpc } from "@/providers/trpc";
+import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/hooks/useAuth";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,6 @@ export function Lobby({
 }) {
   const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
-  const utils = trpc.useUtils();
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
 
   const { name, state } = room;
@@ -27,24 +26,21 @@ export function Lobby({
   const isHost = me !== null && state.hostSeat === me.seat;
   const inviteUrl = `${window.location.origin}/room/${code}`;
 
-  const invalidate = () => utils.rummy.get.invalidate({ code });
   const onErr = (e: { message: string }) => toast.error(e.message);
 
-  const join = trpc.rummy.join.useMutation({ onSuccess: invalidate, onError: onErr });
+  const join = trpc.rummy.join.useMutation({ onError: onErr });
   const leave = trpc.rummy.leave.useMutation({
     onSuccess: () => navigate("/", { replace: true }),
     onError: onErr,
   });
-  const addBot = trpc.rummy.addBot.useMutation({ onSuccess: invalidate, onError: onErr });
+  const addBot = trpc.rummy.addBot.useMutation({ onError: onErr });
   const removePlayer = trpc.rummy.removePlayer.useMutation({
-    onSuccess: invalidate,
     onError: onErr,
   });
   const setOptions = trpc.rummy.setOptions.useMutation({
-    onSuccess: invalidate,
     onError: onErr,
   });
-  const start = trpc.rummy.start.useMutation({ onSuccess: invalidate, onError: onErr });
+  const start = trpc.rummy.start.useMutation({ onError: onErr });
 
   const copy = async (text: string, what: "code" | "link") => {
     try {

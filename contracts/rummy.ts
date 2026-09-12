@@ -132,7 +132,7 @@ export function validateMeld(cards: CardCode[], meldedBefore = true): CardCode[]
 export function meldPoints(meld: Meld): number {
   const nat = meld.cards.filter((c) => !isJoker(c));
   const nj = meld.cards.length - nat.length;
-  let sum = nat.reduce((s, c) => s + cardPoints(c), 0);
+  const sum = nat.reduce((s, c) => s + cardPoints(c), 0);
   if (nj === 0) return sum;
   if (meld.kind === "set") {
     return sum + nj * cardPoints(nat[0] ?? "5S");
@@ -893,11 +893,14 @@ export function tickGame(state: GameState): boolean {
     if (p.isBot || !p.connected) {
       if (now < state.botActionAt) break;
       const moved = botPlayStep(state);
-      acted = acted || moved;
       state.botActionAt = Date.now() + BOT_DELAY_MS;
+      // `botActionAt` juga bagian state terpersisten. Bahkan bila fallback bot
+      // tidak dapat mengubah kartu karena state rusak/akhir sesi, simpan delay
+      // agar scheduler event-driven tidak berputar segera tanpa henti.
+      acted = true;
       if (!moved) break;
     } else {
-      if (now - state.turnStartedAt > TURN_TIMEOUT_MS) {
+      if (now - state.turnStartedAt >= TURN_TIMEOUT_MS) {
         pushLog(state, `${p.name} kehabisan waktu — giliran dimainkan otomatis.`);
         botPlayStep(state);
         state.turnStartedAt = Date.now();

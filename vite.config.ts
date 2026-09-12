@@ -4,22 +4,29 @@ const __dirname = import.meta.dirname;
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
-const voiceGatewayPlugin: Plugin = {
-  name: "remiku-voice-gateway",
+const realtimeGatewayPlugin: Plugin = {
+  name: "remiku-realtime-gateways",
   configureServer(server) {
     const httpServer = server.httpServer;
     if (!httpServer) return;
 
     // ssrLoadModule memakai alias Vite yang sama dengan backend development.
-    // Gateway hanya memproses /api/voice sehingga upgrade HMR Vite tetap aman.
-    void server
-      .ssrLoadModule("/api/voice-router.ts")
-      .then(({ installVoiceGateway }) => {
-        const gateway = installVoiceGateway(httpServer);
-        httpServer.once("close", () => gateway.close());
+    // Masing-masing gateway menyaring path sendiri, sehingga HMR Vite dan
+    // endpoint /api/voice + /api/game dapat berbagi HTTP server yang sama.
+    void Promise.all([
+      server.ssrLoadModule("/api/game-router.ts"),
+      server.ssrLoadModule("/api/voice-router.ts"),
+    ])
+      .then(([{ installGameGateway }, { installVoiceGateway }]) => {
+        const gameGateway = installGameGateway(httpServer);
+        const voiceGateway = installVoiceGateway(httpServer);
+        httpServer.once("close", () => {
+          gameGateway.close();
+          voiceGateway.close();
+        });
       })
       .catch((error: unknown) => {
-        console.error("[voice] gagal memasang WebSocket gateway:", error);
+        console.error("[realtime] gagal memasang WebSocket gateway:", error);
       });
   },
 };
@@ -28,7 +35,7 @@ const voiceGatewayPlugin: Plugin = {
 export default defineConfig({
   plugins: [
     devServer({ entry: "api/boot.ts", exclude: [/^\/(?!api\/).*$/] }),
-    voiceGatewayPlugin,
+    realtimeGatewayPlugin,
     react(),
   ],
   server: {

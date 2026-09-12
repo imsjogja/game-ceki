@@ -11,6 +11,7 @@ import {
   createGoogleOAuthCallbackHandler,
 } from "./auth/google";
 import { Paths } from "@contracts/constants";
+import { installGameGateway } from "./game-router";
 import { installVoiceGateway } from "./voice-router";
 
 const app = new Hono<{ Bindings: HttpBindings }>();
@@ -43,6 +44,7 @@ if (env.isProduction) {
 
   const port = parseInt(process.env.PORT || "3000");
   const server = createServer(getRequestListener(app.fetch));
+  installGameGateway(server);
   installVoiceGateway(server);
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
