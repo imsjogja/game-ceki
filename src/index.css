@@ -114,6 +114,14 @@
     animation: turn-pulse 1.6s ease-in-out infinite;
   }
 
+  /* Cincin hijau saat peserta sedang berbicara di voice chat */
+  .speaking-glow {
+    box-shadow:
+      0 0 0 2.5px rgba(61, 220, 132, 0.95),
+      0 0 18px 5px rgba(61, 220, 132, 0.5);
+    animation: speak-pulse 1s ease-in-out infinite;
+  }
+
   .card-shadow {
     box-shadow:
       0 1px 2px rgba(0, 0, 0, 0.4),
@@ -138,8 +146,22 @@
   }
 }
 
+@keyframes speak-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2.5px rgba(61, 220, 132, 0.95),
+      0 0 12px 3px rgba(61, 220, 132, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px rgba(61, 220, 132, 1),
+      0 0 22px 7px rgba(61, 220, 132, 0.6);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .turn-glow {
+  .turn-glow,
+  .speaking-glow {
     animation: none;
   }
 }
