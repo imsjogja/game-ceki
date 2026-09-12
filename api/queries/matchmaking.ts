@@ -246,6 +246,16 @@ async function queueOrMatch(
       return { status: "matched", roomCode: existing.roomCode };
     }
     await conn.execute("DELETE FROM matchmaking_queue WHERE userId = ?", [user.id]);
+    // Tiket matched dapat stale setelah pemain meninggalkan room. Buat tiket
+    // searching baru dalam transaksi yang sama; tanpa ini query kandidat di
+    // bawah tidak akan menemukan antrean milik pemain ini.
+    const expiresAt = expiryFromNow(MATCHMAKING_QUEUE_TTL_MS);
+    await conn.execute(
+      `INSERT INTO matchmaking_queue
+        (userId, opponentCount, targetScore, status, expiresAt)
+       VALUES (?, ?, ?, 'searching', ?)`,
+      [user.id, opponentCount, targetScore, expiresAt],
+    );
   } else if (existing?.status === "searching") {
     if (
       existing.opponentCount !== opponentCount ||

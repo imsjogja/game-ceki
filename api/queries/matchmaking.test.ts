@@ -21,7 +21,7 @@ vi.mock("mysql2/promise", () => ({
   default: { createPool: mocks.createPool },
 }));
 
-import { getMatchmakingStatus } from "./matchmaking";
+import { enqueueMatchmaking, getMatchmakingStatus } from "./matchmaking";
 
 const matchedTicket = {
   userId: 101,
@@ -98,6 +98,75 @@ describe("getMatchmakingStatus", () => {
     expect(mocks.connection.execute).not.toHaveBeenCalledWith(
       "DELETE FROM matchmaking_queue WHERE userId = ?",
       [101]
+    );
+  });
+});
+
+describe("enqueueMatchmaking", () => {
+  it("menggantikan tiket matched stale dengan tiket searching baru", async () => {
+    let ticket:
+      | (Omit<typeof matchedTicket, "roomCode"> & { roomCode: string | null })
+      | undefined = matchedTicket;
+    const staleRoom = {
+      status: "playing",
+      state: JSON.stringify({
+        players: [{ userId: null, isBot: true }],
+      }),
+    };
+
+    mocks.connection.execute.mockImplementation(async (sql: string) => {
+      if (sql.startsWith("DELETE FROM matchmaking_queue WHERE expiresAt")) {
+        return [[]];
+      }
+      if (sql.includes("WHERE userId = ? FOR UPDATE")) {
+        return [ticket ? [ticket] : []];
+      }
+      if (sql.startsWith("SELECT status, state FROM rooms")) {
+        return [[staleRoom]];
+      }
+      if (sql.startsWith("DELETE FROM matchmaking_queue WHERE userId = ?")) {
+        ticket = undefined;
+        return [[]];
+      }
+      if (sql.includes("INSERT INTO matchmaking_queue")) {
+        ticket = {
+          ...matchedTicket,
+          opponentCount: 1,
+          targetScore: 250,
+          status: "searching",
+          roomCode: null,
+          expiresAt: new Date("2026-09-12T13:01:30Z"),
+        };
+        return [[]];
+      }
+      if (sql.includes("FROM matchmaking_queue") && sql.includes("LIMIT ?")) {
+        return [[ticket]];
+      }
+      if (sql.includes("WHERE userId = ? LIMIT 1")) {
+        return [ticket ? [ticket] : []];
+      }
+      if (sql.includes("COUNT(*) AS queuedPlayers")) {
+        return [[{ queuedPlayers: 1 }]];
+      }
+      return [[]];
+    });
+
+    await expect(
+      enqueueMatchmaking(
+        { id: 101, name: "Tamu", avatar: null } as never,
+        1,
+        250,
+      ),
+    ).resolves.toMatchObject({
+      status: "searching",
+      opponentCount: 1,
+      targetScore: 250,
+      queuedPlayers: 1,
+      opponentsNeeded: 1,
+    });
+    expect(mocks.connection.execute).toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO matchmaking_queue"),
+      [101, 1, 250, expect.any(Date)],
     );
   });
 });
