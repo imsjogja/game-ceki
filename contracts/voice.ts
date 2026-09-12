@@ -1,11 +1,22 @@
 // ------------------------------------------------------------------
-// Kontrak voice chat RemiKu.
+// Kontrak signaling voice chat RemiKu.
 //
-// Audio mengalir peer-to-peer via WebRTC (mesh antar pemain).
-// Server hanya menjadi "kotak surat" signaling in-memory untuk
-// bertukar SDP offer/answer dan ICE candidate — memakai prosedur
-// tRPC biasa (polling), sehingga tidak butuh WebSocket sama sekali.
+// Audio tetap berjalan melalui WebRTC. Server hanya meneruskan signaling
+// secara real-time melalui WebSocket yang terautentikasi; tidak ada mailbox
+// polling sehingga SDP/ICE tidak tertunda atau hilang karena interval poll.
 // ------------------------------------------------------------------
+
+/** Endpoint WebSocket same-origin untuk signaling voice. */
+export const VOICE_SOCKET_PATH = "/api/voice";
+
+/** Detak WebSocket server untuk mendeteksi socket yang putus diam-diam. */
+export const VOICE_HEARTBEAT_MS = 25_000;
+
+/** Maksimum manusia dalam satu permainan saat ini adalah empat pemain. */
+export const VOICE_MAX_PEERS = 4;
+
+/** Batas payload signaling WebSocket agar tidak menjadi jalur upload umum. */
+export const VOICE_MAX_MESSAGE_BYTES = 32 * 1024;
 
 /** Payload signaling yang dipertukarkan antar peer. */
 export type VoiceSignalData =
@@ -23,33 +34,51 @@ export type VoiceSignalData =
       } | null;
     };
 
-/** Amplop pesan signaling: dari peer `from`, untuk peer tujuan. */
-export interface VoiceEnvelope {
-  from: string;
-  data: VoiceSignalData;
-}
-
 /** Info kehadiran peserta voice chat dalam satu room. */
 export interface VoicePeer {
   peerId: string;
   name: string;
   avatar: string | null;
-  seat: number | null;
+  seat: number;
   muted: boolean;
-  lastSeen: number;
 }
 
-/** Versi publik VoicePeer yang dikirim ke klien (tanpa lastSeen). */
-export type VoicePeerPublic = Omit<VoicePeer, "lastSeen">;
+export type VoicePeerPublic = VoicePeer;
 
-/** Peer dianggap hilang jika tidak polling selama ini. */
-export const VOICE_PEER_TTL_MS = 20_000;
+/**
+ * Bentuk serializable RTCIceServer. Kredensial TURN selalu dibuat server
+ * untuk waktu terbatas dan hanya dikirim kepada pemain room yang sah.
+ */
+export interface VoiceIceServer {
+  urls: string[];
+  username?: string;
+  credential?: string;
+  credentialType?: "password";
+}
 
-/** Interval polling signaling dari klien. */
-export const VOICE_POLL_MS = 1500;
+/** Event yang boleh dikirim browser ke server signaling. */
+export type VoiceClientEvent =
+  | { type: "join"; code: string; peerId: string }
+  | { type: "signal"; to: string; data: VoiceSignalData }
+  | { type: "mute"; muted: boolean }
+  | { type: "leave" };
 
-/** Maksimum peserta voice per room (mesh masih ringan di 4–8 orang). */
-export const VOICE_MAX_PEERS = 8;
-
-/** Batas kotak surat per peer — pesan lama dibuang bila tak pernah diambil. */
-export const VOICE_MAX_MAILBOX = 60;
+/** Event yang dikirim server ke browser. */
+export type VoiceServerEvent =
+  | { type: "ready"; peers: VoicePeerPublic[]; iceServers: VoiceIceServer[] }
+  | { type: "peer-joined"; peer: VoicePeerPublic }
+  | { type: "peer-updated"; peerId: string; muted: boolean }
+  | { type: "peer-left"; peerId: string }
+  | { type: "signal"; from: string; data: VoiceSignalData }
+  | {
+      type: "error";
+      code:
+        | "unauthorized"
+        | "forbidden"
+        | "room-not-found"
+        | "room-full"
+        | "peer-unavailable"
+        | "invalid-state"
+        | "room-closed";
+      message: string;
+    };

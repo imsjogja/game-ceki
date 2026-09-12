@@ -17,21 +17,19 @@ export default function Room() {
       refetchInterval: 1200,
       retry: false,
       refetchOnWindowFocus: true,
-    },
+    }
   );
 
-  // Voice chat room — WebRTC P2P, signaling lewat polling tRPC ringan.
+  // Voice chat WebRTC P2P dengan signaling WebSocket event-driven.
   const room = roomQuery.data;
   const state = room?.state;
   const me = state?.you ?? null;
-  const myPlayer = state?.players.find((p) => p.seat === me?.seat);
   const voice = useVoiceChat({
     code: roomCode,
-    name: myPlayer?.name ?? "Penonton",
-    avatar: myPlayer?.avatar ?? null,
     seat: me?.seat ?? null,
   });
   const roomUnavailable = !roomQuery.isLoading && (!!roomQuery.error || !room);
+  const canUseVoice = me !== null && state?.matchType !== "stranger";
 
   // Room yang sudah dihancurkan dapat masih terbuka di tab pemain terakhir.
   // Pakai navigasi dokumen, bukan hanya state router, agar tab yang sedang
@@ -85,9 +83,7 @@ export default function Room() {
     return (
       <>
         <GameTable code={roomCode} room={room} voiceBySeat={voice.bySeat} />
-        {room.state.matchType !== "stranger" && (
-          <VoiceControls voice={voice} />
-        )}
+        {canUseVoice && <VoiceControls voice={voice} />}
       </>
     );
   }
@@ -95,9 +91,7 @@ export default function Room() {
   return (
     <>
       <Lobby code={roomCode} room={room} />
-      {room.state.matchType !== "stranger" && (
-        <VoiceControls voice={voice} />
-      )}
+      {canUseVoice && <VoiceControls voice={voice} />}
     </>
   );
 }

@@ -15,6 +15,10 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       OWNER_GOOGLE_SUB: ${OWNER_GOOGLE_SUB:-}
+      VOICE_STUN_URLS: ${VOICE_STUN_URLS:-stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302}
+      VOICE_TURN_URLS: ${VOICE_TURN_URLS:-}
+      VOICE_TURN_SECRET: ${VOICE_TURN_SECRET:-}
+      VOICE_TURN_TTL_SECONDS: ${VOICE_TURN_TTL_SECONDS:-600}
     ports:
       - "${APP_PORT:-3000}:3000"
     restart: unless-stopped
@@ -22,7 +26,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "node -e \"fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\"",
+          'node -e "fetch(''http://localhost:3000/'').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"',
         ]
       interval: 10s
       timeout: 5s
@@ -42,7 +46,11 @@ services:
       - remiku_mysql_data:/var/lib/mysql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}"]
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20

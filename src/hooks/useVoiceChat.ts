@@ -1,39 +1,43 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { trpc } from "@/providers/trpc";
 import {
-  VOICE_POLL_MS,
-  type VoiceEnvelope,
+  VOICE_SOCKET_PATH,
+  type VoiceClientEvent,
+  type VoiceIceServer,
   type VoicePeerPublic,
+  type VoiceServerEvent,
   type VoiceSignalData,
 } from "@contracts/voice";
 
-// ------------------------------------------------------------------
-// useVoiceChat — voice chat room berbasis WebRTC mesh.
-//
-// Audio mengalir langsung antar pemain (P2P). Server hanya dipakai
-// sebagai kotak surat signaling (SDP/ICE) lewat polling tRPC ringan.
-// Memakai pola "perfect negotiation" agar tabrakan offer antar peer
-// terselesaikan otomatis: peer dengan peerId lebih besar bersikap
-// "polite" (mengalah saat tabrakan).
-// ------------------------------------------------------------------
+// Audio WebRTC berjalan langsung antarpemain. WebSocket same-origin hanya
+// meneruskan signaling SDP/ICE sehingga tidak lagi ada polling 1,5 detik.
+
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_BASE_MS = 750;
+const JOIN_TIMEOUT_MS = 10_000;
+const MAX_DEFERRED_SIGNALS_PER_PEER = 64;
+
+export type VoiceConnectionState =
+  "idle" | "connecting" | "connected" | "reconnecting" | "failed";
 
 export interface VoiceUiPeer extends VoicePeerPublic {
   speaking: boolean;
+  connectionState: RTCPeerConnectionState;
 }
 
 interface PeerEntry {
   pc: RTCPeerConnection;
   polite: boolean;
   makingOffer: boolean;
+  ignoreOffer: boolean;
+  isSettingRemoteAnswerPending: boolean;
+  pendingCandidates: (RTCIceCandidateInit | null)[];
   audio: HTMLAudioElement | null;
+  audioSource: MediaStreamAudioSourceNode | null;
+  audioStream: MediaStream | null;
   analyser: AnalyserNode | null;
   buf: Uint8Array<ArrayBuffer> | null;
 }
-
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] },
-];
 
 function makePeerId(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -41,330 +45,707 @@ function makePeerId(): string {
     : `p-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
-export function useVoiceChat(opts: {
-  code: string;
-  name: string;
-  avatar: string | null;
-  seat: number | null;
-}) {
-  const { code } = opts;
-  const utils = trpc.useUtils();
+function getSocketUrl(): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}${VOICE_SOCKET_PATH}`;
+}
+
+function toRtcIceServers(servers: VoiceIceServer[]): RTCIceServer[] {
+  return servers.map(server => ({
+    urls: server.urls,
+    username: server.username,
+    credential: server.credential,
+    credentialType: server.credentialType,
+  }));
+}
+
+function parseServerEvent(raw: unknown): VoiceServerEvent | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const event = JSON.parse(raw) as { type?: unknown };
+    return typeof event.type === "string" ? (event as VoiceServerEvent) : null;
+  } catch {
+    return null;
+  }
+}
+
+function closeQuietly(pc: RTCPeerConnection): void {
+  try {
+    pc.close();
+  } catch {
+    // Sudah ditutup browser.
+  }
+}
+
+export function useVoiceChat(opts: { code: string; seat: number | null }) {
+  const { code, seat } = opts;
 
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [connectionState, setConnectionState] =
+    useState<VoiceConnectionState>("idle");
   const [peers, setPeers] = useState<VoiceUiPeer[]>([]);
   const [speakingSelf, setSpeakingSelf] = useState(false);
 
-  const peerIdRef = useRef<string>(makePeerId());
-  const activeRef = useRef(false);
-  const busyRef = useRef(false);
-  const mutedRef = useRef(false);
   const optsRef = useRef(opts);
-  optsRef.current = opts;
-  const streamRef = useRef<MediaStream | null>(null);
+  const peerIdRef = useRef(makePeerId());
+  const activeRef = useRef(false);
+  const mutedRef = useRef(false);
+  const startingRef = useRef(false);
+  const operationRef = useRef(0);
+  const socketRef = useRef<WebSocket | null>(null);
+  const iceServersRef = useRef<RTCIceServer[]>([]);
+  const peerDirectoryRef = useRef(new Map<string, VoicePeerPublic>());
   const entriesRef = useRef(new Map<string, PeerEntry>());
+  const deferredSignalsRef = useRef(new Map<string, VoiceSignalData[]>());
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const joinTimeoutRef = useRef<number | null>(null);
+  const messageQueueRef = useRef(Promise.resolve());
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const selfSrcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const selfAnalyserRef = useRef<AnalyserNode | null>(null);
   const selfBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const meterTimerRef = useRef<number | null>(null);
 
-  // ---- signaling -------------------------------------------------
+  const connectRef = useRef<() => void>(() => {});
+  const handleServerEventRef = useRef<
+    (event: VoiceServerEvent) => Promise<void>
+  >(async () => {});
+  const stopRef = useRef<() => void>(() => {});
 
-  const sendSignal = useCallback(
-    async (to: string, data: VoiceSignalData) => {
-      try {
-        await utils.client.voice.signal.mutate({
-          code: optsRef.current.code,
-          peerId: peerIdRef.current,
-          to,
-          data,
-        });
-      } catch {
-        // kegagalan sesaat — poll berikutnya memulihkan
-      }
+  useEffect(() => {
+    optsRef.current = opts;
+  }, [code, opts, seat]);
+
+  const clearJoinTimeout = useCallback(() => {
+    if (joinTimeoutRef.current !== null) {
+      window.clearTimeout(joinTimeoutRef.current);
+      joinTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  const updatePeerUi = useCallback(
+    (peerId: string, update: (peer: VoiceUiPeer) => VoiceUiPeer): void => {
+      setPeers(previous =>
+        previous.map(peer => (peer.peerId === peerId ? update(peer) : peer))
+      );
     },
-    [utils],
+    []
   );
 
-  // ---- manajemen peer connection ----------------------------------
+  const syncPeersUi = useCallback(() => {
+    const directory = [...peerDirectoryRef.current.values()].sort(
+      (a, b) => a.seat - b.seat || a.name.localeCompare(b.name)
+    );
+    setPeers(previous => {
+      const old = new Map(previous.map(peer => [peer.peerId, peer]));
+      return directory.map(peer => {
+        const before = old.get(peer.peerId);
+        return {
+          ...peer,
+          speaking: before?.speaking ?? false,
+          connectionState: before?.connectionState ?? "new",
+        };
+      });
+    });
+  }, []);
 
-  const destroyPeer = useCallback((peerId: string) => {
+  const destroyPeer = useCallback((peerId: string): void => {
     const entry = entriesRef.current.get(peerId);
     if (!entry) return;
+
     entriesRef.current.delete(peerId);
-    try {
-      entry.pc.close();
-    } catch {
-      /* noop */
-    }
+    closeQuietly(entry.pc);
     if (entry.audio) {
+      entry.audio.pause();
       entry.audio.srcObject = null;
       entry.audio.remove();
     }
     try {
+      entry.audioSource?.disconnect();
       entry.analyser?.disconnect();
     } catch {
-      /* noop */
+      // Audio graph mungkin sudah tertutup.
     }
   }, []);
 
-  const ensurePeer = useCallback(
-    (peer: VoicePeerPublic) => {
-      if (peer.peerId === peerIdRef.current) return;
-      if (entriesRef.current.has(peer.peerId)) return;
-      const stream = streamRef.current;
-      if (!stream) return;
+  const destroyAllPeers = useCallback(() => {
+    for (const peerId of [...entriesRef.current.keys()]) destroyPeer(peerId);
+  }, [destroyPeer]);
 
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+  const sendClientEvent = useCallback((event: VoiceClientEvent): boolean => {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify(event));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const sendSignal = useCallback(
+    (to: string, data: VoiceSignalData): void => {
+      sendClientEvent({ type: "signal", to, data });
+    },
+    [sendClientEvent]
+  );
+
+  const flushCandidates = useCallback(async (entry: PeerEntry) => {
+    const candidates = entry.pendingCandidates.splice(0);
+    for (const candidate of candidates) {
+      try {
+        await entry.pc.addIceCandidate(candidate);
+      } catch (error) {
+        if (!entry.ignoreOffer) {
+          console.warn(
+            "[voice] kandidat ICE ditolak setelah remote SDP:",
+            error
+          );
+        }
+      }
+    }
+  }, []);
+
+  const handleSignal = useCallback(
+    async (from: string, data: VoiceSignalData): Promise<void> => {
+      const entry = entriesRef.current.get(from);
+      if (!entry) {
+        const queued = deferredSignalsRef.current.get(from) ?? [];
+        if (queued.length < MAX_DEFERRED_SIGNALS_PER_PEER) queued.push(data);
+        deferredSignalsRef.current.set(from, queued);
+        return;
+      }
+
+      const { pc } = entry;
+      if (data.kind === "ice") {
+        if (entry.ignoreOffer) return;
+        if (!pc.remoteDescription) {
+          entry.pendingCandidates.push(data.candidate);
+          return;
+        }
+        try {
+          await pc.addIceCandidate(data.candidate);
+        } catch (error) {
+          if (!entry.ignoreOffer) {
+            console.warn("[voice] kandidat ICE tidak dapat dipasang:", error);
+          }
+        }
+        return;
+      }
+
+      const description = data.description as RTCSessionDescriptionInit;
+      const readyForOffer =
+        !entry.makingOffer &&
+        (pc.signalingState === "stable" || entry.isSettingRemoteAnswerPending);
+      const offerCollision = description.type === "offer" && !readyForOffer;
+      entry.ignoreOffer = !entry.polite && offerCollision;
+      if (entry.ignoreOffer) return;
+
+      try {
+        if (offerCollision && pc.signalingState !== "stable") {
+          await pc.setLocalDescription({ type: "rollback" });
+        }
+        entry.isSettingRemoteAnswerPending = description.type === "answer";
+        await pc.setRemoteDescription(description);
+        await flushCandidates(entry);
+        if (description.type === "offer") {
+          await pc.setLocalDescription();
+          const local = pc.localDescription;
+          if (local) {
+            sendSignal(from, {
+              kind: "sdp",
+              description: {
+                type: local.type as "offer" | "answer",
+                sdp: local.sdp,
+              },
+            });
+          }
+        }
+      } catch (error) {
+        console.warn("[voice] gagal memproses SDP:", error);
+      } finally {
+        entry.isSettingRemoteAnswerPending = false;
+      }
+    },
+    [flushCandidates, sendSignal]
+  );
+
+  const ensurePeer = useCallback(
+    (peer: VoicePeerPublic): void => {
+      if (peer.peerId === peerIdRef.current) return;
+      peerDirectoryRef.current.set(peer.peerId, peer);
+
+      const existing = entriesRef.current.get(peer.peerId);
+      if (existing) return;
+      const stream = streamRef.current;
+      if (!stream || !activeRef.current) return;
+
+      const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
       const entry: PeerEntry = {
         pc,
+        // ID yang lebih besar mengalah ketika dua browser mengirim offer
+        // bersamaan (perfect negotiation).
         polite: peerIdRef.current > peer.peerId,
         makingOffer: false,
+        ignoreOffer: false,
+        isSettingRemoteAnswerPending: false,
+        pendingCandidates: [],
         audio: null,
+        audioSource: null,
+        audioStream: null,
         analyser: null,
         buf: null,
       };
       entriesRef.current.set(peer.peerId, entry);
+      updatePeerUi(peer.peerId, current => ({
+        ...current,
+        connectionState: pc.connectionState,
+      }));
 
       pc.onnegotiationneeded = async () => {
         try {
           entry.makingOffer = true;
           await pc.setLocalDescription();
-          const desc = pc.localDescription;
-          if (desc) {
-            await sendSignal(peer.peerId, {
+          const local = pc.localDescription;
+          if (local) {
+            sendSignal(peer.peerId, {
               kind: "sdp",
-              description: { type: desc.type as "offer" | "answer", sdp: desc.sdp },
+              description: {
+                type: local.type as "offer" | "answer",
+                sdp: local.sdp,
+              },
             });
           }
-        } catch {
-          /* akan dicoba ulang oleh siklus berikutnya */
+        } catch (error) {
+          console.warn("[voice] gagal membuat offer WebRTC:", error);
         } finally {
           entry.makingOffer = false;
         }
       };
 
-      pc.onicecandidate = (ev) => {
-        const c = ev.candidate;
-        void sendSignal(peer.peerId, {
+      pc.onicecandidate = ({ candidate }) => {
+        sendSignal(peer.peerId, {
           kind: "ice",
-          candidate: c
+          candidate: candidate
             ? {
-                candidate: c.candidate,
-                sdpMid: c.sdpMid,
-                sdpMLineIndex: c.sdpMLineIndex,
+                candidate: candidate.candidate,
+                sdpMid: candidate.sdpMid,
+                sdpMLineIndex: candidate.sdpMLineIndex,
                 usernameFragment:
-                  (c as unknown as { usernameFragment?: string | null })
-                    .usernameFragment ?? null,
+                  (
+                    candidate as RTCIceCandidate & {
+                      usernameFragment?: string | null;
+                    }
+                  ).usernameFragment ?? null,
               }
             : null,
         });
       };
 
-      pc.ontrack = (ev) => {
-        const remote = ev.streams[0];
-        if (!remote) return;
-        const el = document.createElement("audio");
-        el.autoplay = true;
-        el.setAttribute("playsinline", "");
-        el.srcObject = remote;
-        el.style.display = "none";
-        document.body.appendChild(el);
-        entry.audio = el;
-        void el.play().catch(() => {
-          /* autoplay ditahan — tombol mic sudah berupa gestur pengguna */
+      pc.ontrack = event => {
+        const remote = event.streams[0] ?? new MediaStream([event.track]);
+        if (!entry.audio) {
+          const audio = document.createElement("audio");
+          audio.autoplay = true;
+          audio.setAttribute("playsinline", "");
+          audio.style.display = "none";
+          document.body.appendChild(audio);
+          entry.audio = audio;
+        }
+        if (entry.audio.srcObject !== remote) entry.audio.srcObject = remote;
+        void entry.audio.play().catch(() => {
+          // Pemanggilan mic berasal dari user gesture; browser tertentu tetap
+          // dapat menahan autoplay ketika tab belum pernah mendapat fokus.
         });
-        const ctx = audioCtxRef.current;
-        if (ctx) {
-          try {
-            const src = ctx.createMediaStreamSource(remote);
-            const analyser = ctx.createAnalyser();
+
+        if (entry.audioStream === remote) return;
+        try {
+          entry.audioSource?.disconnect();
+          entry.analyser?.disconnect();
+          entry.audioSource = null;
+          entry.analyser = null;
+          entry.buf = null;
+          entry.audioStream = remote;
+          const context = audioCtxRef.current;
+          if (context) {
+            const source = context.createMediaStreamSource(remote);
+            const analyser = context.createAnalyser();
             analyser.fftSize = 512;
-            src.connect(analyser);
+            source.connect(analyser);
+            entry.audioSource = source;
             entry.analyser = analyser;
             entry.buf = new Uint8Array(analyser.fftSize);
-          } catch {
-            /* indikator bicara peer dinonaktifkan */
           }
+        } catch (error) {
+          console.warn("[voice] indikator volume peer tidak tersedia:", error);
         }
       };
 
       pc.onconnectionstatechange = () => {
+        if (entriesRef.current.get(peer.peerId) !== entry) return;
+        updatePeerUi(peer.peerId, current => ({
+          ...current,
+          connectionState: pc.connectionState,
+        }));
         if (pc.connectionState === "failed") {
-          // hancurkan — poll berikutnya membangun ulang koneksi
-          destroyPeer(peer.peerId);
+          setConnectionState("failed");
+          try {
+            pc.restartIce();
+          } catch {
+            // Tombol "coba lagi" akan membangun ulang koneksi signaling.
+          }
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState !== "failed") return;
+        try {
+          pc.restartIce();
+        } catch {
+          // Browser lama tidak mendukung restartIce.
         }
       };
 
       for (const track of stream.getTracks()) pc.addTrack(track, stream);
-    },
-    [destroyPeer, sendSignal],
-  );
 
-  const handleMessage = useCallback(
-    async (msg: VoiceEnvelope) => {
-      const entry = entriesRef.current.get(msg.from);
-      if (!entry) return;
-      const { pc } = entry;
-      try {
-        if (msg.data.kind === "sdp") {
-          const desc = msg.data.description as RTCSessionDescriptionInit;
-          const collision =
-            desc.type === "offer" &&
-            (entry.makingOffer || pc.signalingState !== "stable");
-          // impolite mengabaikan offer yang bertabrakan
-          if (collision && !entry.polite) return;
-          if (desc.type === "offer" && pc.signalingState !== "stable") {
-            await pc.setLocalDescription({ type: "rollback" });
+      const queued = deferredSignalsRef.current.get(peer.peerId);
+      if (queued?.length) {
+        deferredSignalsRef.current.delete(peer.peerId);
+        void (async () => {
+          for (const signal of queued) {
+            await handleSignal(peer.peerId, signal);
           }
-          await pc.setRemoteDescription(desc);
-          if (desc.type === "offer") {
-            await pc.setLocalDescription();
-            const local = pc.localDescription;
-            if (local) {
-              await sendSignal(msg.from, {
-                kind: "sdp",
-                description: {
-                  type: local.type as "offer" | "answer",
-                  sdp: local.sdp,
-                },
-              });
-            }
-          }
-        } else {
-          await pc.addIceCandidate(msg.data.candidate);
-        }
-      } catch {
-        /* pesan dobel/kedaluwarsa — abaikan */
+        })();
       }
     },
-    [sendSignal],
+    [handleSignal, sendSignal, updatePeerUi]
   );
 
-  // ---- polling signaling ------------------------------------------
+  const scheduleReconnect = useCallback(() => {
+    if (!activeRef.current || reconnectTimerRef.current !== null) return;
+    const attempt = reconnectAttemptRef.current + 1;
+    reconnectAttemptRef.current = attempt;
+    if (attempt > MAX_RECONNECT_ATTEMPTS) {
+      setConnectionState("failed");
+      toast.error(
+        "Koneksi voice terputus. Tekan coba lagi untuk menyambungkan."
+      );
+      return;
+    }
 
-  const handlePoll = useCallback(
-    async (data: { peers: VoicePeerPublic[]; messages: VoiceEnvelope[] }) => {
+    setConnectionState("reconnecting");
+    const delay = Math.min(
+      10_000,
+      RECONNECT_BASE_MS * 2 ** (attempt - 1) + Math.round(Math.random() * 250)
+    );
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      connectRef.current();
+    }, delay);
+  }, []);
+
+  const handleServerEvent = useCallback(
+    async (event: VoiceServerEvent): Promise<void> => {
       if (!activeRef.current) return;
-      const myId = peerIdRef.current;
 
-      // server melupakanku (TTL) → gabung ulang
-      if (!data.peers.some((p) => p.peerId === myId)) {
-        const o = optsRef.current;
-        try {
-          await utils.client.voice.join.mutate({
-            code: o.code,
-            peerId: myId,
-            name: o.name,
-            avatar: o.avatar,
-            seat: o.seat,
-            muted: mutedRef.current,
-          });
-        } catch {
-          /* coba lagi di poll berikutnya */
+      switch (event.type) {
+        case "ready": {
+          clearJoinTimeout();
+          reconnectAttemptRef.current = 0;
+          iceServersRef.current = toRtcIceServers(event.iceServers);
+          setConnectionState("connected");
+
+          const remoteIds = new Set(event.peers.map(peer => peer.peerId));
+          peerDirectoryRef.current.clear();
+          for (const peer of event.peers)
+            peerDirectoryRef.current.set(peer.peerId, peer);
+          for (const peerId of [...entriesRef.current.keys()]) {
+            if (!remoteIds.has(peerId)) destroyPeer(peerId);
+          }
+          syncPeersUi();
+          for (const peer of event.peers) ensurePeer(peer);
+          return;
         }
+        case "peer-joined":
+          peerDirectoryRef.current.set(event.peer.peerId, event.peer);
+          syncPeersUi();
+          ensurePeer(event.peer);
+          return;
+        case "peer-updated": {
+          const peer = peerDirectoryRef.current.get(event.peerId);
+          if (peer) {
+            peerDirectoryRef.current.set(event.peerId, {
+              ...peer,
+              muted: event.muted,
+            });
+            syncPeersUi();
+          }
+          return;
+        }
+        case "peer-left":
+          peerDirectoryRef.current.delete(event.peerId);
+          deferredSignalsRef.current.delete(event.peerId);
+          destroyPeer(event.peerId);
+          syncPeersUi();
+          return;
+        case "signal":
+          await handleSignal(event.from, event.data);
+          return;
+        case "error":
+          if (event.code === "peer-unavailable") {
+            toast.info(event.message);
+            return;
+          }
+          setConnectionState("failed");
+          toast.error(event.message);
+          stopRef.current();
+          return;
       }
-
-      // sinkronkan mesh: bangun koneksi baru, tutup yang hilang
-      const remote = data.peers.filter((p) => p.peerId !== myId);
-      for (const p of remote) ensurePeer(p);
-      for (const id of [...entriesRef.current.keys()]) {
-        if (!remote.some((p) => p.peerId === id)) destroyPeer(id);
-      }
-
-      // proses pesan signaling secara berurutan
-      for (const msg of data.messages) await handleMessage(msg);
-
-      // perbarui daftar peer di UI (pertahankan flag speaking)
-      setPeers((prev) => {
-        const speakingMap = new Map(prev.map((p) => [p.peerId, p.speaking]));
-        return remote.map((p) => ({
-          ...p,
-          speaking: speakingMap.get(p.peerId) ?? false,
-        }));
-      });
     },
-    [ensurePeer, destroyPeer, handleMessage, utils],
+    [clearJoinTimeout, destroyPeer, ensurePeer, handleSignal, syncPeersUi]
   );
-
-  const pollQuery = trpc.voice.poll.useQuery(
-    { code, peerId: peerIdRef.current },
-    {
-      enabled: active,
-      refetchInterval: VOICE_POLL_MS,
-      refetchIntervalInBackground: true,
-      refetchOnWindowFocus: false,
-      retry: false,
-    },
-  );
-
-  const pollData = pollQuery.data;
   useEffect(() => {
-    if (!active || !pollData) return;
-    void handlePoll(pollData);
-  }, [active, pollData, handlePoll]);
+    handleServerEventRef.current = handleServerEvent;
+  }, [handleServerEvent]);
 
-  // ---- pengukur suara (indikator bicara) --------------------------
+  const connect = useCallback(() => {
+    if (!activeRef.current) return;
+    const current = socketRef.current;
+    if (
+      current &&
+      (current.readyState === WebSocket.CONNECTING ||
+        current.readyState === WebSocket.OPEN)
+    ) {
+      return;
+    }
+
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(getSocketUrl());
+    } catch (error) {
+      console.warn("[voice] WebSocket tidak dapat dibuat:", error);
+      scheduleReconnect();
+      return;
+    }
+    socketRef.current = socket;
+
+    socket.onopen = () => {
+      if (!activeRef.current || socketRef.current !== socket) {
+        socket.close(1000, "voice-stopped");
+        return;
+      }
+      sendClientEvent({
+        type: "join",
+        code: optsRef.current.code,
+        peerId: peerIdRef.current,
+      });
+      clearJoinTimeout();
+      joinTimeoutRef.current = window.setTimeout(() => {
+        if (socketRef.current === socket) {
+          socket.close(4002, "voice-join-timeout");
+        }
+      }, JOIN_TIMEOUT_MS);
+    };
+
+    socket.onmessage = ({ data }) => {
+      const event = parseServerEvent(data);
+      if (!event) {
+        console.warn("[voice] event server tidak valid.");
+        return;
+      }
+      messageQueueRef.current = messageQueueRef.current
+        .then(() => handleServerEventRef.current(event))
+        .catch((error: unknown) => {
+          console.warn("[voice] gagal memproses event server:", error);
+        });
+    };
+
+    socket.onerror = () => {
+      // Event close menangani retry; browser sengaja tidak memberi detail error.
+    };
+
+    socket.onclose = ({ code: closeCode, reason }) => {
+      if (socketRef.current !== socket) return;
+      socketRef.current = null;
+      clearJoinTimeout();
+      if (!activeRef.current) return;
+      if (closeCode === 4000 && reason === "replaced-by-new-session") {
+        toast.info("Voice chat dipindahkan ke tab lain.");
+        stopRef.current();
+        return;
+      }
+      if (closeCode === 4001 && reason === "room-closed") {
+        toast.info("Room sudah ditutup.");
+        stopRef.current();
+        return;
+      }
+
+      destroyAllPeers();
+      setPeers(previous =>
+        previous.map(peer => ({
+          ...peer,
+          speaking: false,
+          connectionState: "closed",
+        }))
+      );
+      scheduleReconnect();
+    };
+  }, [clearJoinTimeout, destroyAllPeers, scheduleReconnect, sendClientEvent]);
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const startMeter = useCallback(() => {
-    const ctx = new AudioContext();
-    audioCtxRef.current = ctx;
+    if (audioCtxRef.current) return;
+    const context = new AudioContext();
+    audioCtxRef.current = context;
+    void context.resume().catch(() => {});
+
     const stream = streamRef.current;
     if (stream) {
       try {
-        const src = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
+        const source = context.createMediaStreamSource(stream);
+        const analyser = context.createAnalyser();
         analyser.fftSize = 512;
-        src.connect(analyser);
-        selfSrcRef.current = src;
+        source.connect(analyser);
+        selfSrcRef.current = source;
         selfAnalyserRef.current = analyser;
         selfBufRef.current = new Uint8Array(analyser.fftSize);
-      } catch {
-        /* indikator bicara diri dinonaktifkan */
+      } catch (error) {
+        console.warn(
+          "[voice] indikator volume mikrofon tidak tersedia:",
+          error
+        );
       }
     }
 
-    const loud = (
+    const isSpeaking = (
       analyser: AnalyserNode | null,
-      buf: Uint8Array<ArrayBuffer> | null,
-    ) => {
-      if (!analyser || !buf) return false;
-      analyser.getByteTimeDomainData(buf);
+      buffer: Uint8Array<ArrayBuffer> | null
+    ): boolean => {
+      if (!analyser || !buffer) return false;
+      analyser.getByteTimeDomainData(buffer);
       let sum = 0;
       const step = 4;
-      for (let i = 0; i < buf.length; i += step) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
+      for (let index = 0; index < buffer.length; index += step) {
+        const value = (buffer[index] - 128) / 128;
+        sum += value * value;
       }
-      return Math.sqrt(sum / (buf.length / step)) > 0.02;
+      return Math.sqrt(sum / (buffer.length / step)) > 0.02;
     };
 
     meterTimerRef.current = window.setInterval(() => {
-      const selfNow =
-        !mutedRef.current && loud(selfAnalyserRef.current, selfBufRef.current);
-      setSpeakingSelf((prev) => (prev === selfNow ? prev : selfNow));
-
-      setPeers((prev) => {
+      const selfSpeaking =
+        !mutedRef.current &&
+        isSpeaking(selfAnalyserRef.current, selfBufRef.current);
+      setSpeakingSelf(previous =>
+        previous === selfSpeaking ? previous : selfSpeaking
+      );
+      setPeers(previous => {
         let changed = false;
-        const next = prev.map((p) => {
-          const e = entriesRef.current.get(p.peerId);
-          const sp = e ? loud(e.analyser, e.buf) : false;
-          if (sp !== p.speaking) changed = true;
-          return sp === p.speaking ? p : { ...p, speaking: sp };
+        const next = previous.map(peer => {
+          const entry = entriesRef.current.get(peer.peerId);
+          const speaking =
+            !peer.muted &&
+            isSpeaking(entry?.analyser ?? null, entry?.buf ?? null);
+          if (speaking !== peer.speaking) changed = true;
+          return speaking === peer.speaking ? peer : { ...peer, speaking };
         });
-        return changed ? next : prev;
+        return changed ? next : previous;
       });
     }, 250);
   }, []);
 
-  // ---- kontrol publik ---------------------------------------------
+  const stopMedia = useCallback(() => {
+    if (meterTimerRef.current !== null) {
+      window.clearInterval(meterTimerRef.current);
+      meterTimerRef.current = null;
+    }
+    try {
+      selfSrcRef.current?.disconnect();
+      selfAnalyserRef.current?.disconnect();
+    } catch {
+      // Audio graph sudah dibersihkan.
+    }
+    selfSrcRef.current = null;
+    selfAnalyserRef.current = null;
+    selfBufRef.current = null;
+    const context = audioCtxRef.current;
+    audioCtxRef.current = null;
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => {});
+    }
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  }, []);
+
+  const stop = useCallback(() => {
+    operationRef.current += 1;
+    activeRef.current = false;
+    startingRef.current = false;
+    clearJoinTimeout();
+    clearReconnectTimer();
+
+    const socket = socketRef.current;
+    socketRef.current = null;
+    if (socket) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: "leave" }));
+        }
+        socket.close(1000, "voice-stopped");
+      } catch {
+        // Socket mungkin telah ditutup oleh jaringan.
+      }
+    }
+
+    destroyAllPeers();
+    stopMedia();
+    peerDirectoryRef.current.clear();
+    deferredSignalsRef.current.clear();
+    iceServersRef.current = [];
+    reconnectAttemptRef.current = 0;
+    setActive(false);
+    setStarting(false);
+    setMuted(false);
+    setSpeakingSelf(false);
+    setPeers([]);
+    setConnectionState("idle");
+    mutedRef.current = false;
+  }, [clearJoinTimeout, clearReconnectTimer, destroyAllPeers, stopMedia]);
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
 
   const start = useCallback(async () => {
-    if (activeRef.current || busyRef.current) return;
-    busyRef.current = true;
+    if (activeRef.current || startingRef.current) return;
+    if (seat === null || !code) {
+      toast.error("Hanya pemain dalam room yang dapat memakai voice chat.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error("Browser ini tidak mendukung akses mikrofon.");
+      return;
+    }
+
+    const operation = operationRef.current + 1;
+    operationRef.current = operation;
+    startingRef.current = true;
     setStarting(true);
+    setConnectionState("connecting");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -373,108 +754,111 @@ export function useVoiceChat(opts: {
           autoGainControl: true,
         },
       });
+      if (operationRef.current !== operation || !startingRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
       streamRef.current = stream;
-      const o = optsRef.current;
-      await utils.client.voice.join.mutate({
-        code: o.code,
-        peerId: peerIdRef.current,
-        name: o.name,
-        avatar: o.avatar,
-        seat: o.seat,
-        muted: false,
-      });
+      mutedRef.current = false;
       activeRef.current = true;
       setActive(true);
       startMeter();
-    } catch {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      toast.error(
-        "Tidak bisa mengakses mikrofon. Izinkan akses mic lalu coba lagi.",
-      );
+      connectRef.current();
+    } catch (error) {
+      if (operationRef.current === operation) {
+        console.warn("[voice] akses mikrofon gagal:", error);
+        setConnectionState("idle");
+        toast.error(
+          "Tidak bisa mengakses mikrofon. Izinkan akses mic lalu coba lagi."
+        );
+      }
     } finally {
-      busyRef.current = false;
-      setStarting(false);
+      if (operationRef.current === operation) {
+        startingRef.current = false;
+        setStarting(false);
+      }
     }
-  }, [startMeter, utils]);
+  }, [code, seat, startMeter]);
 
-  const stop = useCallback(() => {
-    if (!activeRef.current) return;
-    activeRef.current = false;
-    setActive(false);
-    void utils.client.voice.leave
-      .mutate({ code: optsRef.current.code, peerId: peerIdRef.current })
-      .catch(() => {});
-    for (const id of [...entriesRef.current.keys()]) destroyPeer(id);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (meterTimerRef.current) {
-      clearInterval(meterTimerRef.current);
-      meterTimerRef.current = null;
+  const reconnect = useCallback(() => {
+    if (!activeRef.current || startingRef.current) return;
+    clearJoinTimeout();
+    clearReconnectTimer();
+    reconnectAttemptRef.current = 0;
+    setConnectionState("reconnecting");
+
+    const socket = socketRef.current;
+    socketRef.current = null;
+    if (socket) {
+      try {
+        socket.close(4002, "voice-reconnect");
+      } catch {
+        // Tidak perlu menunggu socket lama.
+      }
     }
-    try {
-      selfSrcRef.current?.disconnect();
-    } catch {
-      /* noop */
-    }
-    selfSrcRef.current = null;
-    selfAnalyserRef.current = null;
-    selfBufRef.current = null;
-    void audioCtxRef.current?.close().catch(() => {});
-    audioCtxRef.current = null;
-    setPeers([]);
-    setSpeakingSelf(false);
-    setMuted(false);
-    mutedRef.current = false;
-  }, [destroyPeer, utils]);
+    destroyAllPeers();
+    setPeers(previous =>
+      previous.map(peer => ({
+        ...peer,
+        speaking: false,
+        connectionState: "new",
+      }))
+    );
+    connectRef.current();
+  }, [clearJoinTimeout, clearReconnectTimer, destroyAllPeers]);
 
   const toggleMute = useCallback(() => {
-    setMuted((prev) => {
-      const next = !prev;
+    if (!activeRef.current) return;
+    setMuted(previous => {
+      const next = !previous;
       mutedRef.current = next;
-      streamRef.current?.getAudioTracks().forEach((t) => {
-        t.enabled = !next;
+      streamRef.current?.getAudioTracks().forEach(track => {
+        track.enabled = !next;
       });
-      if (activeRef.current) {
-        const o = optsRef.current;
-        void utils.client.voice.join
-          .mutate({
-            code: o.code,
-            peerId: peerIdRef.current,
-            name: o.name,
-            avatar: o.avatar,
-            seat: o.seat,
-            muted: next,
-          })
-          .catch(() => {});
-      }
+      sendClientEvent({ type: "mute", muted: next });
       return next;
     });
-  }, [utils]);
+  }, [sendClientEvent]);
 
-  // bersih total saat komponen dilepas (pindah halaman)
-  const stopRef = useRef(stop);
-  stopRef.current = stop;
+  // Bila React memakai kembali instance halaman room untuk kode baru, tutup
+  // mic/socket room lama sebelum bergabung ke room selanjutnya.
+  const previousCodeRef = useRef(code);
+  useEffect(() => {
+    if (previousCodeRef.current === code) return;
+    previousCodeRef.current = code;
+    peerIdRef.current = makePeerId();
+    stopRef.current();
+  }, [code]);
+
+  useEffect(() => {
+    if (seat === null) stopRef.current();
+  }, [seat]);
+
   useEffect(() => () => stopRef.current(), []);
 
-  /** Peta kursi → status voice — untuk indikator di meja permainan. */
   const bySeat = useMemo(() => {
-    const m = new Map<number, { speaking: boolean; muted: boolean }>();
-    for (const p of peers) {
-      if (p.seat != null) m.set(p.seat, { speaking: p.speaking, muted: p.muted });
+    const result = new Map<number, { speaking: boolean; muted: boolean }>();
+    for (const peer of peers) {
+      result.set(peer.seat, {
+        speaking: peer.speaking,
+        muted: peer.muted,
+      });
     }
-    return m;
+    return result;
   }, [peers]);
 
   return {
     active,
     starting,
     muted,
+    connectionState,
     peers,
     speakingSelf,
     bySeat,
     start,
     stop,
+    reconnect,
     toggleMute,
   };
 }

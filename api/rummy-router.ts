@@ -8,7 +8,7 @@ import {
   getLiveStats,
   touchRoomPresence,
 } from "./presence";
-import { destroyVoiceRoom } from "./voice-router";
+import { destroyVoiceRoom, disconnectVoiceUser } from "./voice-router";
 import { rooms } from "@db/schema";
 import {
   getRoomByCode,
@@ -267,6 +267,7 @@ export const rummyRouter = createRouter({
 
         if (outcome.result.didLeave) {
           clearPlayerRoomPresence(String(ctx.user.id), input.code);
+          disconnectVoiceUser(input.code, ctx.user.id);
         }
         if (outcome.destroyed) {
           clearRoomPresence(input.code);
@@ -288,6 +289,7 @@ export const rummyRouter = createRouter({
           // yang keluar pada saat hampir bersamaan. Pemain ini tetap boleh
           // kembali ke beranda dan langsung mencari match baru.
           clearPlayerRoomPresence(String(ctx.user.id), input.code);
+          disconnectVoiceUser(input.code, ctx.user.id);
           await cleanMatchmakingAfterLeave(ctx.user.id, input.code, false);
           return { ok: true };
         }
@@ -299,6 +301,7 @@ export const rummyRouter = createRouter({
           const currentRoom = await getRoomByCode(input.code);
           if (!currentRoom || !getPlayerByUser(currentRoom.state, ctx.user.id)) {
             clearPlayerRoomPresence(String(ctx.user.id), input.code);
+            disconnectVoiceUser(input.code, ctx.user.id);
             await cleanMatchmakingAfterLeave(
               ctx.user.id,
               input.code,
@@ -340,21 +343,26 @@ export const rummyRouter = createRouter({
   removePlayer: authedQuery
     .input(z.object({ code: codeSchema, seat: z.number().int().min(0).max(3) }))
     .mutation(async ({ ctx, input }) => {
-      return withRoom(input.code, (state) => {
+      const result = await withRoom(input.code, (state) => {
         assertHost(state, ctx.user.id);
         if (state.status !== "waiting")
           throw new TRPCError({ code: "BAD_REQUEST", message: "Permainan sudah dimulai" });
         if (input.seat === state.hostSeat)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Host tidak bisa dikeluarkan" });
         const target = state.players.find((p) => p.seat === input.seat);
-        if (!target) return { ok: true };
+        if (!target) return { removedUserId: null };
         state.players = state.players
           .filter((p) => p.seat !== input.seat)
           .map((p, i) => ({ ...p, seat: i }));
         state.hostSeat = 0;
         pushLog(state, `${target.name} dikeluarkan dari room`);
-        return { ok: true };
+        return { removedUserId: target.isBot ? null : target.userId };
       });
+      if (result.removedUserId !== null) {
+        clearPlayerRoomPresence(String(result.removedUserId), input.code);
+        disconnectVoiceUser(input.code, result.removedUserId);
+      }
+      return { ok: true };
     }),
 
   setOptions: authedQuery
