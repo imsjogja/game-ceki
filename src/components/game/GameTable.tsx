@@ -17,6 +17,7 @@ import {
   ScoreboardDialog,
 } from "@/components/game/modals";
 import { Logo } from "@/components/SiteHeader";
+import { VoiceHeaderControl } from "@/components/game/VoiceControls";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -47,6 +48,7 @@ import {
 } from "@contracts/rummy";
 import { cn } from "@/lib/utils";
 import { playTurnChime, resumeAudio } from "@/lib/sounds";
+import type { VoiceChat } from "@/hooks/useVoiceChat";
 import {
   ScrollText,
   LayoutGrid,
@@ -285,10 +287,12 @@ export function GameTable({
   code,
   room,
   voiceBySeat,
+  voice,
 }: {
   code: string;
   room: { name: string; state: ClientState };
   voiceBySeat?: Map<number, SeatVoice>;
+  voice?: VoiceChat;
 }) {
   useAuth();
   const navigate = useNavigate();
@@ -600,6 +604,7 @@ export function GameTable({
               )}
               <span className="game-header-label">Suara</span>
             </Button>
+            {voice && <VoiceHeaderControl voice={voice} />}
             <Button
               size="sm"
               variant="ghost"

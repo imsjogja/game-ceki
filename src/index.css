@@ -444,3 +444,167 @@
     animation: none;
   }
 }
+
+@layer utilities {
+  /*
+   * Voice desktop memakai lajur kiri khusus, bukan overlay kanan-bawah.
+   * Lajur ini tercadang sebelum content meja, sehingga dock tidak menutup
+   * rak kartu jadi, tombol aksi, deck/buangan, maupun tangan pemain.
+   */
+  .voice-desktop-dock {
+    position: fixed;
+    z-index: 45;
+    top: 50%;
+    left: max(1rem, env(safe-area-inset-left));
+    display: flex;
+    transform: translateY(-50%);
+  }
+
+  .voice-dock-rail {
+    display: flex;
+    width: 3.5rem;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(245, 192, 54, 0.35);
+    border-radius: 1rem;
+    background: rgba(10, 9, 7, 0.88);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(10px);
+  }
+
+  .voice-dock-trigger {
+    position: relative;
+    display: flex;
+    min-height: 3.85rem;
+    width: 100%;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    color: #f5c036;
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .voice-dock-trigger:hover:not(:disabled),
+  .voice-dock-details:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .voice-dock-trigger:focus-visible,
+  .voice-dock-details:focus-visible,
+  .voice-header-control:focus-visible {
+    outline: 2px solid #f5c036;
+    outline-offset: -3px;
+  }
+
+  .voice-dock-trigger:disabled {
+    cursor: wait;
+    opacity: 0.72;
+  }
+
+  .voice-dock-trigger.is-active {
+    color: #7fd4a4;
+  }
+
+  .voice-dock-trigger.is-muted {
+    color: #e0707f;
+  }
+
+  .voice-dock-label {
+    font-family: "Bebas Neue", "Arial Narrow", sans-serif;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+  }
+
+  .voice-dock-details {
+    position: relative;
+    display: flex;
+    min-height: 3rem;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.11);
+    color: rgba(254, 254, 238, 0.65);
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .voice-dock-details:hover {
+    color: #f5c036;
+  }
+
+  .voice-dock-detail-count {
+    min-width: 0.8rem;
+    font-family: "Space Mono", ui-monospace, monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+  }
+
+  .voice-dock-live {
+    position: absolute;
+    right: 0.55rem;
+    top: 0.5rem;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 9999px;
+    background: #7fd4a4;
+    box-shadow: 0 0 0 3px rgba(127, 212, 164, 0.14);
+  }
+
+  .voice-header-control,
+  .voice-lobby-mobile {
+    display: none;
+  }
+
+  .game-stage[data-layout="desktop"] .game-felt-zone {
+    padding-left: 4.75rem;
+  }
+
+  /*
+   * Pada viewport compact, voice menjadi ikon di header dan detailnya muncul
+   * sebagai bottom sheet. Tidak ada elemen tetap yang menumpang kartu tangan.
+   */
+  @media (max-width: 1024px), (max-height: 640px) {
+    .voice-desktop-dock {
+      display: none;
+    }
+
+    .voice-header-control {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 9999px;
+      padding-inline: 0.45rem;
+      transition: color 150ms ease, background 150ms ease;
+    }
+
+    .voice-header-control:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .voice-header-control:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    .voice-lobby-mobile {
+      position: fixed;
+      z-index: 30;
+      top: max(4.25rem, calc(env(safe-area-inset-top) + 3.5rem));
+      right: max(0.75rem, env(safe-area-inset-right));
+      display: block;
+    }
+
+    .voice-lobby-mobile .voice-header-control {
+      min-width: 2.75rem;
+      height: 2.75rem;
+      background: rgba(10, 9, 7, 0.84);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(10px);
+    }
+
+    .voice-mobile-sheet {
+      padding-bottom: max(0px, env(safe-area-inset-bottom));
+    }
+  }
+}

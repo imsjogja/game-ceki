@@ -4,7 +4,10 @@ import { trpc } from "@/lib/trpc";
 import { SiteHeader } from "@/components/SiteHeader";
 import { Lobby } from "@/components/game/Lobby";
 import { GameTable } from "@/components/game/GameTable";
-import { VoiceControls } from "@/components/game/VoiceControls";
+import {
+  LobbyVoiceControl,
+  VoiceControls,
+} from "@/components/game/VoiceControls";
 import { useGameRoom } from "@/hooks/useGameRoom";
 import { useVoiceChat } from "@/hooks/useVoiceChat";
 
@@ -98,7 +101,12 @@ export default function Room() {
   if (room.state.status !== "waiting") {
     return (
       <>
-        <GameTable code={roomCode} room={room} voiceBySeat={voice.bySeat} />
+        <GameTable
+          code={roomCode}
+          room={room}
+          voiceBySeat={voice.bySeat}
+          voice={canUseVoice ? voice : undefined}
+        />
         {canUseVoice && <VoiceControls voice={voice} />}
       </>
     );
@@ -107,7 +115,12 @@ export default function Room() {
   return (
     <>
       <Lobby code={roomCode} room={room} />
-      {canUseVoice && <VoiceControls voice={voice} />}
+      {canUseVoice && (
+        <>
+          <VoiceControls voice={voice} />
+          <LobbyVoiceControl voice={voice} />
+        </>
+      )}
     </>
   );
 }
