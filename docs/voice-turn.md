@@ -28,7 +28,6 @@ harus memakai shared secret, misalnya:
 ```conf
 listening-port=3478
 fingerprint
-lt-cred-mech
 use-auth-secret
 static-auth-secret=<secret-yang-sama-dengan-VOICE_TURN_SECRET>
 realm=turn.example.com
