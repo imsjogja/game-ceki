@@ -8,20 +8,21 @@ import { Button } from "@/components/ui/button";
 import {
   Copy, Check, Share2, Crown, Bot, X, UserPlus, LogOut, Play, Loader2,
 } from "lucide-react";
-import { TARGET_SCORES } from "@contracts/rummy";
+import { TARGET_SCORES, type ClientState } from "@contracts/rummy";
 
-export function Lobby({ code }: { code: string }) {
+export function Lobby({
+  code,
+  room,
+}: {
+  code: string;
+  room: { name: string; state: ClientState };
+}) {
   const { user, isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
 
-  const roomQuery = trpc.rummy.get.useQuery(
-    { code },
-    { refetchInterval: 1200, retry: false },
-  );
-  if (!roomQuery.data) return null;
-  const { name, state } = roomQuery.data;
+  const { name, state } = room;
   const me = state.you;
   const isHost = me !== null && state.hostSeat === me.seat;
   const inviteUrl = `${window.location.origin}/room/${code}`;

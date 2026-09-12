@@ -13,6 +13,7 @@ import { rooms } from "@db/schema";
 import {
   getRoomByCode,
   withRoom,
+  withRoomIfChanged,
   withRoomAndDestroyIf,
   maybeRecordMatch,
   getLeaderboard,
@@ -279,15 +280,34 @@ export const rummyRouter = createRouter({
 
         return { ok: true };
       } catch (error) {
-        if (!(error instanceof TRPCError) || error.code !== "NOT_FOUND") {
+        if (!(error instanceof TRPCError)) {
           throw error;
         }
-        // Idempoten: room mungkin sudah dihapus oleh manusia terakhir lain
-        // yang keluar pada saat hampir bersamaan. Pemain ini tetap boleh
-        // kembali ke beranda dan langsung mencari match baru.
-        clearPlayerRoomPresence(String(ctx.user.id), input.code);
-        await cleanMatchmakingAfterLeave(ctx.user.id, input.code, false);
-        return { ok: true };
+        if (error.code === "NOT_FOUND") {
+          // Idempoten: room mungkin sudah dihapus oleh manusia terakhir lain
+          // yang keluar pada saat hampir bersamaan. Pemain ini tetap boleh
+          // kembali ke beranda dan langsung mencari match baru.
+          clearPlayerRoomPresence(String(ctx.user.id), input.code);
+          await cleanMatchmakingAfterLeave(ctx.user.id, input.code, false);
+          return { ok: true };
+        }
+        if (error.code === "CONFLICT") {
+          // Bila retry optimistic lock kalah dari request lain, cek sekali
+          // lagi. Jika request itu ternyata sudah mengeluarkan pemain ini atau
+          // menghancurkan room, perlakukan leave sebagai sukses agar UI tidak
+          // tertahan pada URL room yang sudah mati.
+          const currentRoom = await getRoomByCode(input.code);
+          if (!currentRoom || !getPlayerByUser(currentRoom.state, ctx.user.id)) {
+            clearPlayerRoomPresence(String(ctx.user.id), input.code);
+            await cleanMatchmakingAfterLeave(
+              ctx.user.id,
+              input.code,
+              !currentRoom,
+            );
+            return { ok: true };
+          }
+        }
+        throw error;
       }
     }),
 
@@ -421,7 +441,7 @@ export const rummyRouter = createRouter({
   get: publicQuery
     .input(z.object({ code: codeSchema }))
     .query(async ({ ctx, input }) => {
-      return withRoom(input.code, async (state, room) => {
+      return withRoomIfChanged(input.code, async (state, room) => {
         if (
           state.matchType === "stranger" &&
           !getPlayerByUser(state, ctx.user?.id ?? -1)
@@ -432,14 +452,20 @@ export const rummyRouter = createRouter({
           });
         }
         // Lazy tick: gerakkan bot / timeout pemain
-        tickGame(state);
+        const gameChanged = tickGame(state);
         // sinyal kehadiran untuk statistik live di landing
         touchRoomPresence(ctx.user ? String(ctx.user.id) : null, room.code);
+        // Hasil hanya tercatat satu kali. Bila status finished berasal dari
+        // aksi bot pada tick ini, perubahan `statsRecorded` ikut disimpan.
+        const needsMatchRecord = state.status === "finished" && !state.statsRecorded;
         await maybeRecordMatch(room, state);
         return {
-          code: room.code,
-          name: room.name,
-          state: sanitizeState(state, ctx.user?.id ?? null),
+          changed: gameChanged || needsMatchRecord,
+          result: {
+            code: room.code,
+            name: room.name,
+            state: sanitizeState(state, ctx.user?.id ?? null),
+          },
         };
       });
     }),

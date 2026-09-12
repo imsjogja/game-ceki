@@ -14,13 +14,18 @@ export type RoomMutationOutcome<T> = {
 };
 
 type DestroyPredicate<T> = (state: GameState, room: Room, result: T) => boolean;
+type ConditionalRoomMutation<T> = {
+  result: T;
+  /** `false` berarti state hanya dibaca sehingga versi room tidak dinaikkan. */
+  changed: boolean;
+};
 
 async function mutateRoom<T>(
   code: string,
   fn: (state: GameState, room: Room) => T | Promise<T>,
   shouldDestroy?: DestroyPredicate<T>,
 ): Promise<RoomMutationOutcome<T>> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     const room = await getRoomByCode(code);
     if (!room) {
       throw new TRPCError({ code: "NOT_FOUND", message: "Room tidak ditemukan" });
@@ -47,13 +52,50 @@ async function mutateRoom<T>(
 
 /**
  * Baca → mutasi → simpan dengan optimistic locking (kolom version).
- * Retry hingga 3x bila ada penulisan bersamaan.
+ * Retry hingga 5x bila ada penulisan bersamaan.
  */
 export async function withRoom<T>(
   code: string,
   fn: (state: GameState, room: Room) => T | Promise<T>,
 ): Promise<T> {
   return (await mutateRoom(code, fn)).result;
+}
+
+/**
+ * Baca room dan simpan hanya bila callback benar-benar mengubah state.
+ *
+ * Endpoint polling memakai helper ini agar room yang sedang menunggu,
+ * hasilnya sudah selesai, atau giliran pemain manusia tidak terus-menerus
+ * menaikkan optimistic-lock version. Hal tersebut penting supaya aksi keluar
+ * room tidak bertabrakan dengan write no-op dari polling.
+ */
+export async function withRoomIfChanged<T>(
+  code: string,
+  fn: (
+    state: GameState,
+    room: Room,
+  ) => ConditionalRoomMutation<T> | Promise<ConditionalRoomMutation<T>>,
+): Promise<T> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const room = await getRoomByCode(code);
+    if (!room) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Room tidak ditemukan" });
+    }
+    const state = room.state;
+    const outcome = await fn(state, room);
+    if (!outcome.changed) return outcome.result;
+
+    const res = await getDb()
+      .update(rooms)
+      .set({ state, status: state.status, version: room.version + 1 })
+      .where(and(eq(rooms.code, code), eq(rooms.version, room.version)));
+    const affected = (res as unknown as [{ affectedRows: number }])[0]?.affectedRows ?? 1;
+    if (affected > 0) return outcome.result;
+  }
+  throw new TRPCError({
+    code: "CONFLICT",
+    message: "Room sedang sibuk, coba lagi sesaat",
+  });
 }
 
 /**

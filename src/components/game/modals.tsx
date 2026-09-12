@@ -159,6 +159,7 @@ export function GameEndModal({
   onRematch,
   onHome,
   pending,
+  homePending = false,
   open,
   onClose,
 }: {
@@ -167,6 +168,7 @@ export function GameEndModal({
   onRematch: () => void;
   onHome: () => void;
   pending: boolean;
+  homePending?: boolean;
   open: boolean;
   onClose: () => void;
 }) {
@@ -215,8 +217,13 @@ export function GameEndModal({
               {pending ? "MENYIAPKAN…" : "MAIN LAGI"}
             </button>
           )}
-          <button onClick={onHome} className="btn-stitch h-12 flex-1">
-            <Home className="h-4 w-4" /> BERANDA
+          <button
+            onClick={onHome}
+            disabled={homePending}
+            className="btn-stitch h-12 flex-1 disabled:opacity-60"
+          >
+            {homePending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Home className="h-4 w-4" />}
+            {homePending ? "KELUAR…" : "BERANDA"}
           </button>
         </div>
       </DialogContent>

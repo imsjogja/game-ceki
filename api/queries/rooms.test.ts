@@ -10,7 +10,7 @@ vi.mock("./connection", () => ({
   getDb: mocks.getDb,
 }));
 
-import { withRoomAndDestroyIf } from "./rooms";
+import { withRoomAndDestroyIf, withRoomIfChanged } from "./rooms";
 
 describe("withRoomAndDestroyIf", () => {
   beforeEach(() => {
@@ -56,6 +56,43 @@ describe("withRoomAndDestroyIf", () => {
     });
     expect(remove).toHaveBeenCalledOnce();
     expect(where).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("withRoomIfChanged", () => {
+  beforeEach(() => {
+    mocks.getDb.mockReset();
+  });
+
+  it("tidak menaikkan versi room bila polling tidak mengubah state", async () => {
+    const state = createRoomState({
+      hostUserId: 7,
+      hostName: "Tamu",
+      hostAvatar: null,
+      targetScore: 250,
+      maxPlayers: 2,
+    });
+    const room = {
+      code: "ABC234",
+      state,
+      version: 9,
+    } as Room;
+    const findFirst = vi.fn().mockResolvedValue(room);
+    const update = vi.fn();
+
+    mocks.getDb.mockReturnValue({
+      query: { rooms: { findFirst } },
+      update,
+    });
+
+    await expect(
+      withRoomIfChanged(room.code, (currentState) => ({
+        changed: false,
+        result: currentState.status,
+      })),
+    ).resolves.toBe("waiting");
+
     expect(update).not.toHaveBeenCalled();
   });
 });

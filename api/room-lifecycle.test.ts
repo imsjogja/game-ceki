@@ -33,6 +33,32 @@ describe("room lifecycle", () => {
     expect(state.players[0]).toMatchObject({ isBot: true, seat: 0 });
   });
 
+  it("menghapus room game yang sudah selesai ketika manusia terakhir keluar", () => {
+    const state = createRoomState({
+      hostUserId: 101,
+      hostName: "Tamu",
+      hostAvatar: null,
+      targetScore: 250,
+      maxPlayers: 2,
+      matchType: "bot",
+    });
+    state.players.push(
+      makePlayer({
+        seat: 1,
+        userId: null,
+        name: "Bot Kartini",
+        avatar: null,
+        isBot: true,
+      }),
+    );
+    state.status = "finished";
+
+    expect(leavePlayerFromRoom(state, 101)).toEqual({
+      didLeave: true,
+      shouldDestroy: true,
+    });
+  });
+
   it("mempertahankan room permainan bila masih ada manusia lain", () => {
     const state = createRoomState({
       hostUserId: 101,

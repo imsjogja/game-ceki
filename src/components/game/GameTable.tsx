@@ -203,21 +203,17 @@ function OpponentSeat({
 
 export function GameTable({
   code,
+  room,
   voiceBySeat,
 }: {
   code: string;
+  room: { name: string; state: ClientState };
   voiceBySeat?: Map<number, SeatVoice>;
 }) {
   useAuth();
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const stage = useStage();
-
-  const roomQuery = trpc.rummy.get.useQuery(
-    { code },
-    { refetchInterval: 1200, retry: false },
-  );
-  const data = roomQuery.data;
 
   const [selected, setSelected] = useState<CardCode[]>([]);
   const [sortMode, setSortMode] = useState<"rank" | "suit">("rank");
@@ -233,10 +229,10 @@ export function GameTable({
     }
   });
 
-  const state = data?.state;
-  const me = state?.you ?? null;
-  const myTurn = !!state && !!me && state.status === "playing" && state.turnSeat === me.seat;
-  const phase = state?.phase;
+  const state = room.state;
+  const me = state.you;
+  const myTurn = !!me && state.status === "playing" && state.turnSeat === me.seat;
+  const phase = state.phase;
 
   // modal hasil selalu terbuka otomatis setiap kali sesi/permainan berakhir
   useEffect(() => {
@@ -323,7 +319,7 @@ export function GameTable({
             ? "KELUAR ROOM…"
             : "MEMPROSES…";
 
-  const myPlayer: ClientPlayer | undefined = state?.players.find((p) => p.seat === me?.seat);
+  const myPlayer: ClientPlayer | undefined = state.players.find((p) => p.seat === me?.seat);
 
   // urutan tampilan tangan: manual (drag) > urut otomatis
   const displayHand = useMemo(() => {
@@ -340,8 +336,6 @@ export function GameTable({
       (a, b) => (isJoker(a) ? 9 : suitOrder[a[1]]) - (isJoker(b) ? 9 : suitOrder[b[1]]),
     );
   }, [myPlayer?.hand, manualOrder, sortMode]);
-
-  if (!state) return null;
 
   const validSelection =
     selected.length >= 3 &&
@@ -430,7 +424,7 @@ export function GameTable({
           <Logo size="text-xl" onHome={leaveToHome} disabled={leave.isPending} />
           <div className="flex items-center gap-2 text-center">
             <span className="font-display text-base tracking-wide text-white/60">
-              {data?.name}
+              {room.name}
             </span>
             <span className="rounded-full border border-dashed border-[#f5c036]/40 px-3 py-0.5 font-num text-xs font-bold tracking-[0.25em] text-[#f5c036]">
               {code}
@@ -824,6 +818,7 @@ export function GameTable({
           onRematch={() => rematch.mutate({ code })}
           onHome={leaveToHome}
           pending={rematch.isPending}
+          homePending={leave.isPending}
           open={resultOpen}
           onClose={() => setResultOpen(false)}
         />

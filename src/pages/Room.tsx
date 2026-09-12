@@ -20,7 +20,8 @@ export default function Room() {
   );
 
   // Voice chat room — WebRTC P2P, signaling lewat polling tRPC ringan.
-  const state = roomQuery.data?.state;
+  const room = roomQuery.data;
+  const state = room?.state;
   const me = state?.you ?? null;
   const myPlayer = state?.players.find((p) => p.seat === me?.seat);
   const voice = useVoiceChat({
@@ -46,18 +47,18 @@ export default function Room() {
     );
   }
 
-  if (roomQuery.error || !roomQuery.data) {
+  if (roomQuery.error || !room) {
     // Room dapat menjadi tidak bisa diakses saat pemain terakhir keluar atau
     // sesi logout. Jangan biarkan pemain tertahan pada layar room yang mati.
     return <Navigate to="/" replace />;
   }
 
   // Selain status waiting, tampilkan meja permainan (pemain & penonton)
-  if (roomQuery.data.state.status !== "waiting") {
+  if (room.state.status !== "waiting") {
     return (
       <>
-        <GameTable code={roomCode} voiceBySeat={voice.bySeat} />
-        {roomQuery.data.state.matchType !== "stranger" && (
+        <GameTable code={roomCode} room={room} voiceBySeat={voice.bySeat} />
+        {room.state.matchType !== "stranger" && (
           <VoiceControls voice={voice} />
         )}
       </>
@@ -66,8 +67,8 @@ export default function Room() {
 
   return (
     <>
-      <Lobby code={roomCode} />
-      {roomQuery.data.state.matchType !== "stranger" && (
+      <Lobby code={roomCode} room={room} />
+      {room.state.matchType !== "stranger" && (
         <VoiceControls voice={voice} />
       )}
     </>
