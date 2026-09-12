@@ -307,11 +307,11 @@ export function GameTable({ code }: { code: string }) {
   const fanCards = state.discard.slice(-fanSize);
   const buriedCount = state.discard.length - fanSize;
 
-  // ── geometri kipas tangan (landai, ala Gin Rummy Palace) ──
+  // ── geometri kipas tangan (kartu besar 112px, landai) ──
   const n = displayHand.length;
   const mid = (n - 1) / 2;
   /** jarak antar kartu (px) — kipas lebar namun tetap rapat */
-  const fanGap = n <= 1 ? 0 : Math.max(34, Math.min(74, (stage.w - 190) / (n - 1)));
+  const fanGap = n <= 1 ? 0 : Math.max(38, Math.min(96, (stage.w - 240) / (n - 1)));
   /** sudut antar kartu — sebaran total ±~10° agar tidak melengkung dalam */
   const fanStep = n <= 1 ? 0 : Math.min(2.8, 28 / n);
 
@@ -422,8 +422,9 @@ export function GameTable({ code }: { code: string }) {
             )}
           </div>
 
-          {/* zona tengah: rak kartu jadi + tumpukan deck/buangan */}
-          <div className="relative z-10 flex min-h-0 flex-1 items-stretch gap-4 px-6 pb-3 pt-1">
+          {/* zona tengah: rak kartu jadi + tumpukan deck/buangan.
+              pb besar — area bawah meja memang ditutupi kipas tangan */}
+          <div className="relative z-10 flex min-h-0 flex-1 items-stretch gap-4 px-6 pb-24 pt-1">
             {/* rak kartu jadi */}
             <div className="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl bg-black/20 p-2 ring-1 ring-white/5">
               {state.melds.length === 0 && !state.closedCard && (
@@ -557,8 +558,10 @@ export function GameTable({ code }: { code: string }) {
           </div>
         </div>
 
+        {/* ===== Info, aksi & kipas tangan — ditarik naik, menutupi tepi bawah meja ===== */}
+        <div className="relative z-30 -mt-24 shrink-0">
         {/* ===== Bar aksi ===== */}
-        <div className="relative z-30 flex h-12 shrink-0 flex-wrap items-center justify-center gap-2 px-3">
+        <div className="flex h-12 flex-wrap items-center justify-center gap-2 px-3">
           {me && myPlayer && (
             <>
               <span className="rounded-full bg-black/60 px-3 py-1.5 font-num text-xs font-bold text-[#FEFEEE] ring-1 ring-white/15">
@@ -627,14 +630,14 @@ export function GameTable({ code }: { code: string }) {
           )}
         </div>
 
-        {/* ===== Kipas tangan saya — lebar, landai, bisa diseret ===== */}
+        {/* ===== Kipas tangan saya — kartu besar, lebar, bisa diseret ===== */}
         {me && myPlayer?.hand ? (
-          <div className="relative z-30 flex h-[158px] shrink-0 flex-col items-center pb-2">
+          <div className="flex h-[204px] flex-col items-center pb-2">
             <Reorder.Group
               axis="x"
               values={displayHand}
               onReorder={(v: CardCode[]) => setManualOrder(v)}
-              className="flex h-[134px] items-end justify-center"
+              className="flex h-[178px] items-end justify-center"
               key={`round-${state.round}`}
             >
               {displayHand.map((c, i) => {
@@ -647,7 +650,7 @@ export function GameTable({ code }: { code: string }) {
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ type: "spring", stiffness: 260, damping: 24, delay: i * 0.04 }}
                     whileDrag={{ scale: 1.1, zIndex: 50 }}
-                    style={{ marginLeft: i === 0 ? 0 : fanGap - 80, zIndex: i }}
+                    style={{ marginLeft: i === 0 ? 0 : fanGap - 112, zIndex: i }}
                     className={cn(manualOrder && "cursor-grab active:cursor-grabbing")}
                   >
                     {/* kipas: rotasi di wrapper agar tak bentrok dengan drag */}
@@ -659,7 +662,7 @@ export function GameTable({ code }: { code: string }) {
                     >
                       <PlayingCard
                         code={c}
-                        size="xl"
+                        size="2xl"
                         selected={selected.includes(c)}
                         dimmed={myTurn && phase === "play" && selected.length > 0 && !selected.includes(c)}
                         disabled={!myTurn || phase !== "play"}
@@ -675,12 +678,13 @@ export function GameTable({ code }: { code: string }) {
             </p>
           </div>
         ) : (
-          <div className="flex h-[158px] shrink-0 items-center justify-center">
+          <div className="flex h-[204px] items-center justify-center">
             <p className="text-sm text-white/40">
               Mode penonton — kamu menyaksikan meja ini secara langsung.
             </p>
           </div>
         )}
+        </div>
       </div>
 
       {/* ===== Modal ===== */}

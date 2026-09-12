@@ -47,7 +47,7 @@ export function SuitIcon({
   }
 }
 
-type Size = "xs" | "sm" | "md" | "lg" | "xl";
+type Size = "xs" | "sm" | "md" | "lg" | "xl" | "2xl";
 
 const SIZES: Record<Size, { w: string; h: string; rank: string; corner: string; center: string }> = {
   xs: { w: "w-8", h: "h-11", rank: "text-[9px]", corner: "w-2", center: "w-4" },
@@ -55,6 +55,7 @@ const SIZES: Record<Size, { w: string; h: string; rank: string; corner: string; 
   md: { w: "w-14", h: "h-20", rank: "text-sm", corner: "w-3", center: "w-7" },
   lg: { w: "w-[4.5rem]", h: "h-[6.5rem]", rank: "text-base", corner: "w-3.5", center: "w-9" },
   xl: { w: "w-20", h: "h-28", rank: "text-lg", corner: "w-4", center: "w-10" },
+  "2xl": { w: "w-28", h: "h-40", rank: "text-2xl", corner: "w-5", center: "w-14" },
 };
 
 /** Kartu remi — wajah krem dengan indeks sudut, atau punggung anyaman merah. */
