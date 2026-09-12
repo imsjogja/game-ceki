@@ -25,6 +25,8 @@ import {
   LoaderCircle,
   Search,
   X,
+  Eye,
+  Radio,
 } from "lucide-react";
 import { TARGET_SCORES } from "@contracts/rummy";
 import { ONLINE_OPPONENT_COUNTS } from "@contracts/matchmaking";
@@ -40,6 +42,7 @@ export default function Home() {
   const [targetScore, setTargetScore] = useState(250);
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [joinCode, setJoinCode] = useState("");
+  const [joinOpen, setJoinOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [botCount, setBotCount] = useState(1);
   const [quickTarget, setQuickTarget] = useState(500);
@@ -504,19 +507,47 @@ export default function Home() {
                 </DialogContent>
               </Dialog>
 
-              <div className="flex items-center gap-2">
-                <Input
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  onKeyDown={(e) => e.key === "Enter" && handleJoin()}
-                  placeholder="KODE ROOM"
-                  maxLength={6}
-                  className="h-12 w-36 rounded-full border-2 border-dashed border-[#f5c036]/50 bg-black/40 text-center font-num text-lg font-bold tracking-[0.3em] text-[#FEFEEE] placeholder:text-white/30"
-                />
-                <button onClick={handleJoin} className="btn-stitch h-12">
-                  GABUNG
-                </button>
-              </div>
+              <Dialog open={joinOpen} onOpenChange={setJoinOpen}>
+                <DialogTrigger asChild>
+                  <button className="btn-stitch h-12">GABUNG ROOM</button>
+                </DialogTrigger>
+                <DialogContent className="border-[#f5c036]/30 bg-[#1c1812] text-[#FEFEEE]">
+                  <DialogHeader>
+                    <DialogTitle className="font-display text-3xl tracking-wide text-[#f5c036]">
+                      GABUNG KE ROOM
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-5 pt-2">
+                    <div>
+                      <label
+                        htmlFor="join-room-code"
+                        className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60"
+                      >
+                        KODE ROOM
+                      </label>
+                      <Input
+                        id="join-room-code"
+                        autoFocus
+                        value={joinCode}
+                        onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                        onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+                        placeholder="CONTOH: ABC234"
+                        maxLength={6}
+                        className="h-12 border-white/20 bg-black/40 text-center font-num text-lg font-bold tracking-[0.3em] text-[#FEFEEE] placeholder:font-sans placeholder:text-xs placeholder:tracking-normal placeholder:text-white/30"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleJoin}
+                      className="h-12 w-full rounded-full bg-[#f5c036] font-display text-xl tracking-wide text-[#1a150a] hover:bg-[#ffd35c]"
+                    >
+                      GABUNG SEKARANG
+                    </Button>
+                    <p className="text-center text-[11px] text-white/40">
+                      Masukkan kode 6 karakter dari temanmu untuk bergabung.
+                    </p>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
 
@@ -541,6 +572,90 @@ export default function Home() {
               </motion.div>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* ============ MEJA PUBLIK YANG SEDANG BERMAIN ============ */}
+      <section className="mx-auto mt-10 max-w-5xl px-4">
+        <div className="rounded-xl border border-dashed border-[#7fd4a4]/35 bg-black/25 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="flex items-center gap-2 font-display text-2xl tracking-wide text-[#7fd4a4]">
+                <Radio className="h-5 w-5 animate-pulse" /> MEJA AKTIF
+              </h2>
+              <p className="mt-1 text-xs text-white/45">
+                Tonton permainan yang sedang berlangsung secara langsung.
+              </p>
+            </div>
+            <span className="rounded-full border border-dashed border-[#7fd4a4]/40 bg-[#286e44]/15 px-3 py-1 font-num text-xs font-bold text-[#7fd4a4]">
+              {live.data?.rooms.length ?? 0} TERBUKA
+            </span>
+          </div>
+
+          {live.isLoading && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {[0, 1].map((index) => (
+                <div
+                  key={index}
+                  className="h-28 animate-pulse rounded-lg border border-white/10 bg-white/[0.04]"
+                />
+              ))}
+            </div>
+          )}
+
+          {!live.isLoading && (live.data?.rooms.length ?? 0) === 0 && (
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/20 px-4 py-8 text-center">
+              <p className="font-display text-xl tracking-wide text-[#FEFEEE]/80">
+                BELUM ADA MEJA TERBUKA
+              </p>
+              <p className="mt-1 text-sm text-white/40">
+                Mulai lawan online atau kembali lagi saat pemain lain sedang bermain.
+              </p>
+            </div>
+          )}
+
+          {(live.data?.rooms.length ?? 0) > 0 && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {live.data?.rooms.map((room) => (
+                <div
+                  key={room.code}
+                  className="rounded-lg border border-[#7fd4a4]/20 bg-[#286e44]/10 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-[#FEFEEE]">
+                        {room.name}
+                      </p>
+                      <p className="mt-1 font-num text-xs tracking-[0.18em] text-white/45">
+                        {room.code}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-white/15 bg-black/25 px-2 py-1 text-[10px] font-bold tracking-wide text-[#7fd4a4]">
+                      {room.matchType === "bot" ? "VS BOT" : "ONLINE"}
+                    </span>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-white/60">
+                      <span className="flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5 text-[#7fd4a4]" />
+                        <b className="font-num text-[#FEFEEE]">{room.playersOnline}</b>
+                        user aktif
+                      </span>
+                      <span>
+                        target <b className="font-num text-[#f5c036]">{room.targetScore}</b>
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/room/${room.code}`)}
+                      className="btn-stitch h-9 shrink-0 px-3 text-xs"
+                    >
+                      <Eye className="h-4 w-4" /> TONTON
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

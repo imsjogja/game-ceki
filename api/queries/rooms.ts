@@ -1,11 +1,22 @@
 import { getDb } from "./connection";
 import { rooms, playerStats, matches, users, type Room } from "@db/schema";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import type { GameState } from "@contracts/rummy";
 
 export async function getRoomByCode(code: string): Promise<Room | undefined> {
   return getDb().query.rooms.findFirst({ where: eq(rooms.code, code) });
+}
+
+/** Ambil snapshot beberapa room dalam satu query untuk direktori landing. */
+export async function getRoomsByCodes(
+  codes: readonly string[],
+): Promise<Room[]> {
+  const uniqueCodes = [...new Set(codes)];
+  if (uniqueCodes.length === 0) return [];
+  return getDb().query.rooms.findMany({
+    where: inArray(rooms.code, uniqueCodes),
+  });
 }
 
 export type RoomMutationOutcome<T> = {

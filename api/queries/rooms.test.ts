@@ -10,7 +10,33 @@ vi.mock("./connection", () => ({
   getDb: mocks.getDb,
 }));
 
-import { withRoomAndDestroyIf, withRoomIfChanged } from "./rooms";
+import {
+  getRoomsByCodes,
+  withRoomAndDestroyIf,
+  withRoomIfChanged,
+} from "./rooms";
+
+describe("getRoomsByCodes", () => {
+  beforeEach(() => {
+    mocks.getDb.mockReset();
+  });
+
+  it("tidak mengakses database bila daftar kode room kosong", async () => {
+    await expect(getRoomsByCodes([])).resolves.toEqual([]);
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("mengambil daftar room sekaligus dalam satu query", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    mocks.getDb.mockReturnValue({
+      query: { rooms: { findMany } },
+    });
+
+    await getRoomsByCodes(["ABC234", "XYZ789", "ABC234"]);
+
+    expect(findMany).toHaveBeenCalledOnce();
+  });
+});
 
 describe("withRoomAndDestroyIf", () => {
   beforeEach(() => {

@@ -18,6 +18,13 @@ interface PlayerPresence {
   room: string;
 }
 
+export interface LiveRoomPresence {
+  code: string;
+  /** Pemain manusia dengan koneksi game aktif pada room ini. */
+  playersOnline: number;
+  lastActiveAt: number;
+}
+
 /** userId → kehadiran terakhir */
 const players = new Map<string, PlayerPresence>();
 /** kode room → waktu aktivitas terakhir */
@@ -58,8 +65,37 @@ export function clearRoomPresence(roomCode: string) {
   }
 }
 
+/**
+ * Ringkasan room yang baru aktif untuk direktori meja di landing.
+ *
+ * Presence sengaja tetap ephemeral: jika server restart, room tidak dianggap
+ * aktif sampai ada pemain/penonton yang benar-benar membuka koneksi lagi.
+ */
+export function getLiveRoomPresence(): LiveRoomPresence[] {
+  sweep(Date.now());
+
+  const playersByRoom = new Map<string, number>();
+  for (const presence of players.values()) {
+    playersByRoom.set(
+      presence.room,
+      (playersByRoom.get(presence.room) ?? 0) + 1
+    );
+  }
+
+  return [...activeRooms.entries()]
+    .map(([code, lastActiveAt]) => ({
+      code,
+      playersOnline: playersByRoom.get(code) ?? 0,
+      lastActiveAt,
+    }))
+    .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+}
+
 /** Statistik live untuk landing page. */
 export function getLiveStats(): { playersOnline: number; activeRooms: number } {
-  sweep(Date.now());
-  return { playersOnline: players.size, activeRooms: activeRooms.size };
+  const rooms = getLiveRoomPresence();
+  return {
+    playersOnline: rooms.reduce((total, room) => total + room.playersOnline, 0),
+    activeRooms: rooms.length,
+  };
 }

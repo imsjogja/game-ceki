@@ -528,15 +528,6 @@ async function authorizeGameMember(
   if (!room) {
     throw new GameJoinError("room-not-found", "Room tidak ditemukan.");
   }
-  if (
-    room.state.matchType === "stranger" &&
-    (!user || !getPlayerByUser(room.state, user.id))
-  ) {
-    throw new GameJoinError(
-      "forbidden",
-      "Room lawan online hanya dapat diakses oleh pesertanya."
-    );
-  }
   const player = user ? getPlayerByUser(room.state, user.id) : undefined;
   return {
     code: room.code,

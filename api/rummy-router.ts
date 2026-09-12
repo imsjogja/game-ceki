@@ -5,7 +5,7 @@ import { getDb } from "./queries/connection";
 import {
   clearPlayerRoomPresence,
   clearRoomPresence,
-  getLiveStats,
+  getLiveRoomPresence,
   touchRoomPresence,
 } from "./presence";
 import {
@@ -18,6 +18,7 @@ import { destroyVoiceRoom, disconnectVoiceUser } from "./voice-router";
 import { rooms } from "@db/schema";
 import {
   getRoomByCode,
+  getRoomsByCodes,
   withRoom,
   withRoomAndDestroyIf,
   maybeRecordMatch,
@@ -545,15 +546,6 @@ export const rummyRouter = createRouter({
           message: "Room tidak ditemukan",
         });
       }
-      if (
-        room.state.matchType === "stranger" &&
-        !getPlayerByUser(room.state, ctx.user?.id ?? -1)
-      ) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Room lawan online hanya dapat diakses oleh pesertanya.",
-        });
-      }
       const player = ctx.user
         ? getPlayerByUser(room.state, ctx.user.id)
         : undefined;
@@ -635,8 +627,47 @@ export const rummyRouter = createRouter({
     return getLeaderboard();
   }),
 
-  /** Statistik live: berapa pemain online & room aktif saat ini (in-memory). */
-  liveStats: publicQuery.query(() => {
-    return getLiveStats();
+  /**
+   * Statistik dan direktori meja sedang berjalan.
+   *
+   * Room buatan teman (`private`) tidak masuk daftar agar tetap hanya dapat
+   * ditemukan melalui kode/link undangan. Meja bot dan lawan online aman untuk
+   * ditonton: snapshot publik selalu menyembunyikan kartu tangan pemain.
+   */
+  liveStats: publicQuery.query(async () => {
+    const presence = getLiveRoomPresence();
+    const roomsInDatabase = await getRoomsByCodes(
+      presence.map(room => room.code),
+    );
+    const roomByCode = new Map(roomsInDatabase.map(room => [room.code, room]));
+    const rooms = presence.flatMap(presenceRoom => {
+      const room = roomByCode.get(presenceRoom.code);
+      if (
+        !room ||
+        room.state.matchType === "private" ||
+        (room.status !== "playing" && room.status !== "roundEnd")
+      ) {
+        return [];
+      }
+      return [
+        {
+          code: room.code,
+          name: room.name,
+          status: room.status,
+          targetScore: room.targetScore,
+          maxPlayers: room.state.maxPlayers,
+          matchType: room.state.matchType,
+          playersOnline: presenceRoom.playersOnline,
+        },
+      ];
+    });
+    return {
+      playersOnline: presence.reduce(
+        (total, room) => total + room.playersOnline,
+        0,
+      ),
+      activeRooms: presence.length,
+      rooms,
+    };
   }),
 });

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   clearPlayerRoomPresence,
   clearRoomPresence,
+  getLiveRoomPresence,
   getLiveStats,
   PRESENCE_TTL_MS,
   touchRoomPresence,
@@ -67,5 +68,29 @@ describe("presence / liveStats", () => {
 
     clearRoomPresence("OLD111");
     expect(getLiveStats()).toEqual({ playersOnline: 1, activeRooms: 1 });
+  });
+
+  it("mengelompokkan jumlah pemain aktif untuk setiap room", () => {
+    const t0 = Date.now() + 5_000_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(t0);
+
+    touchRoomPresence("u1", "OLD111");
+    touchRoomPresence("u2", "OLD111");
+    vi.setSystemTime(t0 + 1_000);
+    touchRoomPresence("u3", "LIVE22");
+
+    expect(getLiveRoomPresence()).toEqual([
+      {
+        code: "LIVE22",
+        playersOnline: 1,
+        lastActiveAt: t0 + 1_000,
+      },
+      {
+        code: "OLD111",
+        playersOnline: 2,
+        lastActiveAt: t0,
+      },
+    ]);
   });
 });
