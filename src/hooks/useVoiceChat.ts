@@ -25,8 +25,19 @@ export interface VoiceUiPeer extends VoicePeerPublic {
   connectionState: RTCPeerConnectionState;
 }
 
+interface UseVoiceChatOptions {
+  code: string;
+  seat: number | null;
+  /**
+   * Voice hanya tersedia untuk pemain yang duduk pada room non-stranger.
+   * Saat aktif, pemain masuk otomatis sebagai pendengar tanpa meminta mic.
+   */
+  enabled?: boolean;
+}
+
 interface PeerEntry {
   pc: RTCPeerConnection;
+  audioTransceiver: RTCRtpTransceiver;
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
@@ -77,12 +88,13 @@ function closeQuietly(pc: RTCPeerConnection): void {
   }
 }
 
-export function useVoiceChat(opts: { code: string; seat: number | null }) {
-  const { code, seat } = opts;
+export function useVoiceChat(opts: UseVoiceChatOptions) {
+  const { code, seat, enabled = true } = opts;
 
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [hasMicrophone, setHasMicrophone] = useState(false);
   const [connectionState, setConnectionState] =
     useState<VoiceConnectionState>("idle");
   const [peers, setPeers] = useState<VoiceUiPeer[]>([]);
@@ -93,6 +105,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
   const activeRef = useRef(false);
   const mutedRef = useRef(false);
   const startingRef = useRef(false);
+  const leftByUserRef = useRef(false);
   const operationRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const iceServersRef = useRef<RTCIceServer[]>([]);
@@ -115,11 +128,11 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
   const handleServerEventRef = useRef<
     (event: VoiceServerEvent) => Promise<void>
   >(async () => {});
-  const stopRef = useRef<() => void>(() => {});
+  const stopRef = useRef<(userInitiated?: boolean) => void>(() => {});
 
   useEffect(() => {
     optsRef.current = opts;
-  }, [code, opts, seat]);
+  }, [code, enabled, opts, seat]);
 
   const clearJoinTimeout = useCallback(() => {
     if (joinTimeoutRef.current !== null) {
@@ -183,6 +196,49 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
   const destroyAllPeers = useCallback(() => {
     for (const peerId of [...entriesRef.current.keys()]) destroyPeer(peerId);
   }, [destroyPeer]);
+
+  const playRemoteAudio = useCallback((audio: HTMLAudioElement): void => {
+    void audio.play().catch(() => {
+      // Pada browser dengan autoplay ketat, event gesture di bawah mencoba
+      // kembali tanpa meminta akses mikrofon kepada pendengar.
+    });
+  }, []);
+
+  const resumeRemoteAudio = useCallback(() => {
+    const context = audioCtxRef.current;
+    if (context?.state === "suspended") void context.resume().catch(() => {});
+    for (const entry of entriesRef.current.values()) {
+      if (entry.audio) playRemoteAudio(entry.audio);
+    }
+  }, [playRemoteAudio]);
+
+  const attachLocalAudio = useCallback((onlyEntry?: PeerEntry): void => {
+    const stream = streamRef.current;
+    const track = stream?.getAudioTracks()[0];
+    if (!stream || !track) return;
+
+    const entries = onlyEntry
+      ? [onlyEntry]
+      : [...entriesRef.current.values()];
+    for (const entry of entries) {
+      if (entry.pc.signalingState === "closed") continue;
+      const transceiver = entry.audioTransceiver;
+      if (transceiver.sender.track?.id === track.id) {
+        if (transceiver.direction === "recvonly") {
+          transceiver.direction = "sendrecv";
+        }
+        continue;
+      }
+
+      // Semua koneksi selalu memiliki transceiver penerima. Saat mic
+      // dinyalakan belakangan, isi sender yang sama agar renegosiasi hanya
+      // menambah arah kirim dan tidak membuat jalur audio kedua.
+      transceiver.direction = "sendrecv";
+      void transceiver.sender.replaceTrack(track).catch(error => {
+        console.warn("[voice] mikrofon tidak dapat dipasang ke peer:", error);
+      });
+    }
+  }, []);
 
   const sendClientEvent = useCallback((event: VoiceClientEvent): boolean => {
     const socket = socketRef.current;
@@ -289,12 +345,18 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
 
       const existing = entriesRef.current.get(peer.peerId);
       if (existing) return;
-      const stream = streamRef.current;
-      if (!stream || !activeRef.current) return;
+      if (!activeRef.current) return;
 
       const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
+      // Pendengar tetap membangun koneksi WebRTC tanpa getUserMedia().
+      // Transceiver ini menerima audio sekarang dan dapat berubah menjadi
+      // sendrecv ketika pemain secara eksplisit menyalakan mikrofon.
+      const audioTransceiver = pc.addTransceiver("audio", {
+        direction: "recvonly",
+      });
       const entry: PeerEntry = {
         pc,
+        audioTransceiver,
         // ID yang lebih besar mengalah ketika dua browser mengirim offer
         // bersamaan (perfect negotiation).
         polite: peerIdRef.current > peer.peerId,
@@ -365,10 +427,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
           entry.audio = audio;
         }
         if (entry.audio.srcObject !== remote) entry.audio.srcObject = remote;
-        void entry.audio.play().catch(() => {
-          // Pemanggilan mic berasal dari user gesture; browser tertentu tetap
-          // dapat menahan autoplay ketika tab belum pernah mendapat fokus.
-        });
+        playRemoteAudio(entry.audio);
 
         if (entry.audioStream === remote) return;
         try {
@@ -418,7 +477,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
         }
       };
 
-      for (const track of stream.getTracks()) pc.addTrack(track, stream);
+      attachLocalAudio(entry);
 
       const queued = deferredSignalsRef.current.get(peer.peerId);
       if (queued?.length) {
@@ -430,7 +489,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
         })();
       }
     },
-    [handleSignal, sendSignal, updatePeerUi]
+    [attachLocalAudio, handleSignal, playRemoteAudio, sendSignal, updatePeerUi]
   );
 
   const scheduleReconnect = useCallback(() => {
@@ -550,6 +609,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
         type: "join",
         code: optsRef.current.code,
         peerId: peerIdRef.current,
+        muted: mutedRef.current,
       });
       clearJoinTimeout();
       joinTimeoutRef.current = window.setTimeout(() => {
@@ -691,7 +751,8 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
     streamRef.current = null;
   }, []);
 
-  const stop = useCallback(() => {
+  const stop = useCallback((userInitiated = true) => {
+    if (userInitiated) leftByUserRef.current = true;
     operationRef.current += 1;
     activeRef.current = false;
     startingRef.current = false;
@@ -720,6 +781,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
     setActive(false);
     setStarting(false);
     setMuted(false);
+    setHasMicrophone(false);
     setSpeakingSelf(false);
     setPeers([]);
     setConnectionState("idle");
@@ -729,10 +791,41 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
     stopRef.current = stop;
   }, [stop]);
 
+  const joinListening = useCallback(() => {
+    if (activeRef.current || startingRef.current || leftByUserRef.current) {
+      return;
+    }
+    if (seat === null || !code || !enabled) return;
+
+    // Jangan minta getUserMedia di sini. Peserta langsung bergabung sebagai
+    // pendengar sehingga tetap dapat menerima audio dari mic pemain lain.
+    mutedRef.current = true;
+    activeRef.current = true;
+    setMuted(true);
+    setActive(true);
+    setConnectionState("connecting");
+    connectRef.current();
+  }, [code, enabled, seat]);
+
   const start = useCallback(async () => {
-    if (activeRef.current || startingRef.current) return;
-    if (seat === null || !code) {
+    if (startingRef.current) return;
+    if (seat === null || !code || !enabled) {
       toast.error("Hanya pemain dalam room yang dapat memakai voice chat.");
+      return;
+    }
+    leftByUserRef.current = false;
+
+    // Jika sudah memiliki stream, tombol ini berfungsi sebagai jalur aman
+    // untuk menyalakan kembali mic yang sebelumnya dibisukan.
+    if (streamRef.current) {
+      mutedRef.current = false;
+      streamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = true;
+      });
+      setMuted(false);
+      setHasMicrophone(true);
+      attachLocalAudio();
+      sendClientEvent({ type: "mute", muted: false });
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -761,14 +854,25 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
 
       streamRef.current = stream;
       mutedRef.current = false;
-      activeRef.current = true;
-      setActive(true);
+      setMuted(false);
+      setHasMicrophone(true);
       startMeter();
-      connectRef.current();
+      attachLocalAudio();
+
+      if (activeRef.current) {
+        // Listener sudah tersambung ketika izin mic diberikan. Umumkan
+        // perubahan status dan negosiasikan sender ke semua peer yang ada.
+        sendClientEvent({ type: "mute", muted: false });
+      } else {
+        activeRef.current = true;
+        setActive(true);
+        setConnectionState("connecting");
+        connectRef.current();
+      }
     } catch (error) {
       if (operationRef.current === operation) {
         console.warn("[voice] akses mikrofon gagal:", error);
-        setConnectionState("idle");
+        if (!activeRef.current) setConnectionState("idle");
         toast.error(
           "Tidak bisa mengakses mikrofon. Izinkan akses mic lalu coba lagi."
         );
@@ -779,7 +883,14 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
         setStarting(false);
       }
     }
-  }, [code, seat, startMeter]);
+  }, [
+    attachLocalAudio,
+    code,
+    enabled,
+    seat,
+    sendClientEvent,
+    startMeter,
+  ]);
 
   const reconnect = useCallback(() => {
     if (!activeRef.current || startingRef.current) return;
@@ -809,7 +920,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
   }, [clearJoinTimeout, clearReconnectTimer, destroyAllPeers]);
 
   const toggleMute = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || !streamRef.current) return;
     setMuted(previous => {
       const next = !previous;
       mutedRef.current = next;
@@ -828,14 +939,35 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
     if (previousCodeRef.current === code) return;
     previousCodeRef.current = code;
     peerIdRef.current = makePeerId();
-    stopRef.current();
+    stopRef.current(false);
+    leftByUserRef.current = false;
   }, [code]);
 
   useEffect(() => {
-    if (seat === null) stopRef.current();
-  }, [seat]);
+    if (!enabled || seat === null) {
+      stopRef.current(false);
+      return;
+    }
+    leftByUserRef.current = false;
+  }, [enabled, seat]);
 
-  useEffect(() => () => stopRef.current(), []);
+  useEffect(() => {
+    if (!enabled || seat === null || leftByUserRef.current) return;
+    joinListening();
+  }, [enabled, joinListening, seat]);
+
+  useEffect(() => {
+    if (!active) return;
+    const resume = () => resumeRemoteAudio();
+    window.addEventListener("pointerdown", resume, { capture: true });
+    window.addEventListener("keydown", resume, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", resume, { capture: true });
+      window.removeEventListener("keydown", resume, { capture: true });
+    };
+  }, [active, resumeRemoteAudio]);
+
+  useEffect(() => () => stopRef.current(false), []);
 
   const bySeat = useMemo(() => {
     const result = new Map<number, { speaking: boolean; muted: boolean }>();
@@ -852,6 +984,7 @@ export function useVoiceChat(opts: { code: string; seat: number | null }) {
     active,
     starting,
     muted,
+    hasMicrophone,
     connectionState,
     peers,
     speakingSelf,

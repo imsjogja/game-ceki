@@ -60,7 +60,7 @@ export interface VoiceIceServer {
 
 /** Event yang boleh dikirim browser ke server signaling. */
 export type VoiceClientEvent =
-  | { type: "join"; code: string; peerId: string }
+  | { type: "join"; code: string; peerId: string; muted: boolean }
   | { type: "signal"; to: string; data: VoiceSignalData }
   | { type: "mute"; muted: boolean }
   | { type: "leave" };

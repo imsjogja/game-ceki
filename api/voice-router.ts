@@ -48,7 +48,14 @@ const signalDataSchema = z.discriminatedUnion("kind", [
 ]);
 
 const clientEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("join"), code: codeSchema, peerId: peerIdSchema }),
+  z.object({
+    type: z.literal("join"),
+    code: codeSchema,
+    peerId: peerIdSchema,
+    // Kompatibel dengan tab yang masih memuat bundle sebelum mode dengar
+    // ditambahkan; client baru selalu mengirim nilai ini secara eksplisit.
+    muted: z.boolean().default(false),
+  }),
   z.object({
     type: z.literal("signal"),
     to: peerIdSchema,
@@ -114,7 +121,7 @@ export class VoiceSignalingHub {
   ): Promise<void> {
     switch (event.type) {
       case "join":
-        await this.join(transport, user, event.code, event.peerId);
+        await this.join(transport, user, event.code, event.peerId, event.muted);
         return;
       case "signal":
         this.signal(transport, event.to, event.data);
@@ -183,7 +190,8 @@ export class VoiceSignalingHub {
     transport: VoiceTransport,
     user: User,
     roomCode: string,
-    peerId: string
+    peerId: string,
+    muted: boolean
   ): Promise<void> {
     const existing = this.memberships.get(transport);
     if (existing) {
@@ -242,7 +250,10 @@ export class VoiceSignalingHub {
       name: identity.name,
       avatar: identity.avatar,
       seat: identity.seat,
-      muted: false,
+      // Pemain dapat masuk ke channel sebagai pendengar tanpa pernah meminta
+      // akses mikrofon. Status ini tetap dibagikan agar peserta lain tahu
+      // bahwa ia tidak sedang mengirim audio.
+      muted,
       roomCode,
       transport,
     };

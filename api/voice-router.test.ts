@@ -31,11 +31,15 @@ function user(id: number): User {
   return { id } as User;
 }
 
-function join(peerId: string): VoiceClientEvent {
-  return { type: "join", code: "ABC234", peerId };
+function join(peerId: string, muted = false): VoiceClientEvent {
+  return { type: "join", code: "ABC234", peerId, muted };
 }
 
-function makeHub(allowedUserIds = new Set([1, 2, 3, 4, 5, 6])): VoiceSignalingHub {
+function makeHub(
+  allowedUserIds = new Set(
+    Array.from({ length: VOICE_MAX_PARTICIPANTS + 2 }, (_, index) => index + 1),
+  ),
+): VoiceSignalingHub {
   const authorize: VoiceAuthorizer = async (member, roomCode) => {
     if (roomCode !== "ABC234" || !allowedUserIds.has(member.id)) {
       throw new Error("not a player");
@@ -86,6 +90,29 @@ describe("VoiceSignalingHub", () => {
     await hub.receive(second, user(2), { type: "leave" });
     expect(eventsOfType(first, "peer-left")).toEqual([
       expect.objectContaining({ peerId: "peer-two" }),
+    ]);
+  });
+
+  it("mendukung peserta mode dengar tanpa mikrofon", async () => {
+    const hub = makeHub();
+    const listener = new FakeTransport();
+    const speaker = new FakeTransport();
+
+    await hub.receive(listener, user(1), join("peer-listener", true));
+    await hub.receive(speaker, user(2), join("peer-speaker", false));
+
+    expect(eventsOfType(speaker, "ready")[0]?.peers).toEqual([
+      expect.objectContaining({ peerId: "peer-listener", muted: true }),
+    ]);
+    expect(eventsOfType(listener, "peer-joined")).toEqual([
+      expect.objectContaining({
+        peer: expect.objectContaining({ peerId: "peer-speaker", muted: false }),
+      }),
+    ]);
+
+    await hub.receive(listener, user(1), { type: "mute", muted: false });
+    expect(eventsOfType(speaker, "peer-updated")).toEqual([
+      expect.objectContaining({ peerId: "peer-listener", muted: false }),
     ]);
   });
 
@@ -215,7 +242,7 @@ describe("VoiceSignalingHub", () => {
     ]);
   });
 
-  it("menerima lima peserta voice dan menolak peserta keenam", async () => {
+  it("menerima peserta voice hingga kapasitas room dan menolak peserta berikutnya", async () => {
     const hub = makeHub();
     const participants = Array.from(
       { length: VOICE_MAX_PARTICIPANTS },
@@ -227,10 +254,14 @@ describe("VoiceSignalingHub", () => {
       expect(eventsOfType(transport, "error")).toHaveLength(0);
     }
 
-    const sixth = new FakeTransport();
-    await hub.receive(sixth, user(6), join("peer-six"));
+    const overflow = new FakeTransport();
+    await hub.receive(
+      overflow,
+      user(VOICE_MAX_PARTICIPANTS + 1),
+      join("peer-overflow"),
+    );
 
-    expect(eventsOfType(sixth, "error")).toEqual([
+    expect(eventsOfType(overflow, "error")).toEqual([
       expect.objectContaining({ code: "room-full" }),
     ]);
   });

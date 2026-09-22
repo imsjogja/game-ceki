@@ -39,7 +39,9 @@ import {
 import {
   validateMeld,
   findMelds,
+  cardLabel,
   isJoker,
+  planDiscardPickupMelds,
   sortHand,
   TURN_TIMEOUT_MS,
   type CardCode,
@@ -129,9 +131,11 @@ function useNow(stepMs = 500) {
 function TurnTimer({
   startedAt,
   isBot,
+  dense = false,
 }: {
   startedAt: number;
   isBot: boolean;
+  dense?: boolean;
 }) {
   const now = useNow();
   if (isBot) return null;
@@ -139,7 +143,12 @@ function TurnTimer({
   const pct = (remain / TURN_TIMEOUT_MS) * 100;
   const secs = Math.ceil(remain / 1000);
   return (
-    <div className="mt-0.5 h-1 w-20 overflow-hidden rounded-full bg-white/10">
+    <div
+      className={cn(
+        "mt-0.5 h-1 overflow-hidden rounded-full bg-white/10",
+        dense ? "w-10" : "w-20"
+      )}
+    >
       <div
         className={cn(
           "h-full rounded-full transition-all",
@@ -173,17 +182,25 @@ function OpponentSeat({
   player,
   state,
   voice,
+  dense = false,
 }: {
   player: ClientPlayer;
   state: ClientState;
   voice?: SeatVoice;
+  /** Ringkaskan kursi ketika meja berisi enam hingga delapan pemain. */
+  dense?: boolean;
 }) {
   const isTurn = state.status === "playing" && state.turnSeat === player.seat;
   const backs = player.inRound ? Math.max(0, Math.min(3, player.handCount)) : 0;
 
   return (
-    <div className="game-opponent-seat flex w-32 flex-col items-center">
-      <div className="flex items-center gap-2">
+    <div
+      className={cn(
+        "game-opponent-seat flex flex-col items-center",
+        dense ? "game-opponent-seat-dense w-20" : "w-32"
+      )}
+    >
+      <div className={cn("flex items-center", dense ? "flex-col gap-0.5" : "gap-2")}>
         <div
           className={cn(
             "relative rounded-full transition-transform duration-300",
@@ -201,12 +218,16 @@ function OpponentSeat({
             <img
               src={player.avatar}
               alt=""
-              className="h-10 w-10 rounded-full object-cover ring-2 ring-black/40"
+              className={cn(
+                "rounded-full object-cover ring-2 ring-black/40",
+                dense ? "h-8 w-8" : "h-10 w-10"
+              )}
             />
           ) : (
             <span
               className={cn(
-                "flex h-10 w-10 items-center justify-center rounded-full font-display text-base ring-2 ring-black/40",
+                "flex items-center justify-center rounded-full font-display ring-2 ring-black/40",
+                dense ? "h-8 w-8 text-sm" : "h-10 w-10 text-base",
                 player.isBot
                   ? "bg-[#3a3a35] text-white/80"
                   : "bg-[#286e44] text-[#FEFEEE]"
@@ -215,7 +236,12 @@ function OpponentSeat({
               {player.name[0]?.toUpperCase()}
             </span>
           )}
-          <span className="absolute -bottom-1 -right-1 rounded-full bg-black/70 px-1.5 py-0.5 font-num text-[10px] font-bold text-[#f5c036] ring-1 ring-[#f5c036]/40">
+          <span
+            className={cn(
+              "absolute -bottom-1 -right-1 rounded-full bg-black/70 font-num font-bold text-[#f5c036] ring-1 ring-[#f5c036]/40",
+              dense ? "px-1 py-px text-[8px]" : "px-1.5 py-0.5 text-[10px]"
+            )}
+          >
             {player.score}
           </span>
           {voice && (
@@ -238,28 +264,36 @@ function OpponentSeat({
             </span>
           )}
         </div>
-        {/* tumpukan kartu lawan + jumlah */}
-        <div className="relative h-8 w-8">
-          {Array.from({ length: backs }).map((_, i) => (
-            <div
-              key={i}
-              className="absolute h-7 w-5 rounded-[3px] bg-[#c10328] ring-1 ring-[#f5c036]/40"
-              style={{
-                left: i * 5,
-                top: -i,
-                backgroundImage:
-                  "repeating-linear-gradient(45deg, rgba(245,192,54,.18) 0 1.5px, transparent 1.5px 4.5px)",
-              }}
-            />
-          ))}
-          <span className="absolute -right-2 -top-1.5 z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/80 px-1 font-num text-[9px] font-bold text-[#FEFEEE] ring-1 ring-white/25">
-            {player.handCount}
+        {dense ? (
+          <span className="rounded bg-black/65 px-1.5 py-px font-num text-[8px] font-bold text-white/70 ring-1 ring-white/15">
+            {player.handCount} KARTU
           </span>
-        </div>
+        ) : (
+          /* tumpukan kartu lawan + jumlah */
+          <div className="relative h-8 w-8">
+            {Array.from({ length: backs }).map((_, i) => (
+              <div
+                key={i}
+                className="absolute h-7 w-5 rounded-[3px] bg-[#c10328] ring-1 ring-[#f5c036]/40"
+                style={{
+                  left: i * 5,
+                  top: -i,
+                  backgroundImage:
+                    "repeating-linear-gradient(45deg, rgba(245,192,54,.18) 0 1.5px, transparent 1.5px 4.5px)",
+                }}
+              />
+            ))}
+            <span className="absolute -right-2 -top-1.5 z-10 flex h-4 min-w-4 items-center justify-center rounded-full bg-black/80 px-1 font-num text-[9px] font-bold text-[#FEFEEE] ring-1 ring-white/25">
+              {player.handCount}
+            </span>
+          </div>
+        )}
       </div>
       <p
         className={cn(
-          "mt-1 max-w-32 truncate text-[11px] font-semibold",
+          dense
+            ? "mt-0.5 max-w-20 truncate text-[9px] font-semibold"
+            : "mt-1 max-w-32 truncate text-[11px] font-semibold",
           isTurn ? "text-[#f5c036]" : "text-[#FEFEEE]"
         )}
       >
@@ -272,14 +306,25 @@ function OpponentSeat({
         <TurnTimer
           startedAt={isTurn ? state.turnStartedAt : 0}
           isBot={!isTurn || player.isBot}
+          dense={dense}
         />
       ) : (
-        <span className="mt-0.5 rounded bg-white/10 px-1.5 py-0.5 text-[8px] font-bold tracking-wide text-white/50">
+        <span
+          className={cn(
+            "mt-0.5 rounded bg-white/10 font-bold tracking-wide text-white/50",
+            dense ? "px-1 py-px text-[7px]" : "px-1.5 py-0.5 text-[8px]"
+          )}
+        >
           SESI BERIKUTNYA
         </span>
       )}
       {player.meldPlus > 0 && (
-        <span className="mt-0.5 rounded bg-[#286e44]/50 px-1.5 py-0.5 font-num text-[10px] font-bold leading-none text-[#7fd4a4]">
+        <span
+          className={cn(
+            "mt-0.5 rounded bg-[#286e44]/50 font-num font-bold leading-none text-[#7fd4a4]",
+            dense ? "px-1 py-px text-[8px]" : "px-1.5 py-0.5 text-[10px]"
+          )}
+        >
           +{player.meldPlus}
         </span>
       )}
@@ -477,6 +522,14 @@ export function GameTable({
   const selectedJoker = oneSelected && isJoker(selected[0]);
   const canTutup = myTurn && phase === "play" && oneSelected && handCount === 1;
   const canDiscard = myTurn && phase === "play" && oneSelected && handCount > 1;
+  const discardPickup = state.discardPickup;
+  const discardPickupResolved =
+    !discardPickup ||
+    (discardPickup.targetMelded &&
+      discardPickup.openedCards >= discardPickup.depth);
+  const pickupCardsStillRequired = discardPickup
+    ? Math.max(0, discardPickup.depth - discardPickup.openedCards)
+    : 0;
 
   /** Apakah kartu buangan sedalam `depth` sah diambil (target + ≥2 kartu tangan = jadi) */
   const takeableDepth = (depth: number): boolean => {
@@ -484,8 +537,21 @@ export function GameTable({
     const pile = state.discard;
     if (depth >= pile.length) return false;
     const target = pile[pile.length - 1 - depth];
-    return findMelds([...myPlayer.hand, target], myPlayer.hasMelded).some(m =>
-      m.includes(target)
+    const targetCanMeld = findMelds(
+      [...myPlayer.hand, target],
+      myPlayer.hasMelded
+    ).some(m => m.includes(target));
+    if (!targetCanMeld) return false;
+    const taken = pile.slice(pile.length - 1 - depth);
+    return Boolean(
+      planDiscardPickupMelds(
+        [...myPlayer.hand, ...taken],
+        target,
+        myPlayer.hasMelded,
+        0,
+        false,
+        depth
+      )
     );
   };
 
@@ -520,6 +586,7 @@ export function GameTable({
     if (meIndex < 0) return seated;
     return [...seated.slice(meIndex + 1), ...seated.slice(0, meIndex)];
   })();
+  const useDenseOpponents = others.length >= 5;
   const canSitForNextRound =
     me === null &&
     state.matchType === "private" &&
@@ -576,6 +643,7 @@ export function GameTable({
               : "landscape"
             : "desktop"
         }
+        data-opponents={useDenseOpponents ? "dense" : "regular"}
         style={{
           width: stage.w,
           height: STAGE_H,
@@ -708,6 +776,7 @@ export function GameTable({
                   player={p}
                   state={state}
                   voice={voiceBySeat?.get(p.seat)}
+                  dense={useDenseOpponents}
                 />
               ))}
             </div>
@@ -956,7 +1025,11 @@ export function GameTable({
                   </button>
                   <button
                     onClick={handleDiscard}
-                    disabled={(!canDiscard && !canTutup) || anyPending}
+                    disabled={
+                      (!canDiscard && !canTutup) ||
+                      !discardPickupResolved ||
+                      anyPending
+                    }
                     className={cn(
                       "game-turn-action h-10 text-base disabled:opacity-50",
                       canTutup ? "btn-gold" : "btn-stitch",
@@ -979,6 +1052,13 @@ export function GameTable({
                   {!myPlayer?.hasMelded && (
                     <span className="game-first-meld-note text-[11px] text-white/40">
                       Tutupan pertama harus seri tanpa joker
+                    </span>
+                  )}
+                  {discardPickup && !discardPickupResolved && (
+                    <span className="rounded-full bg-[#c10328]/20 px-3 py-1.5 text-[11px] font-semibold text-[#ffd2d9] ring-1 ring-[#c10328]/50">
+                      {!discardPickup.targetMelded
+                        ? `WAJIB BUKA ${cardLabel(discardPickup.target)}`
+                        : `WAJIB BUKA ${pickupCardsStillRequired} KARTU LAGI`}
                     </span>
                   )}
                 </>
@@ -1048,6 +1128,12 @@ export function GameTable({
                     >
                       {/* kipas: rotasi di wrapper agar tak bentrok dengan drag */}
                       <div
+                        className={cn(
+                          "relative rounded-[0.55rem]",
+                          discardPickup?.target === c &&
+                            !discardPickup.targetMelded &&
+                            "ring-2 ring-[#f5c036] ring-offset-2 ring-offset-[#1a150a]"
+                        )}
                         style={{
                           transform: `rotate(${rot}deg)`,
                           transformOrigin: "50% 120%",

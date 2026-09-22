@@ -148,7 +148,7 @@ export function RoundEndModal({
           <p className="mb-2 text-center text-[10px] font-semibold tracking-[0.25em] text-white/40">
             SKOR — TARGET {state.targetScore}
           </p>
-          <div className="flex justify-center gap-6">
+          <div className="grid grid-cols-4 justify-center gap-x-2 gap-y-3">
             {state.players
               .filter((player) => !player.isVacant)
               .sort((a, b) => b.score - a.score)
@@ -203,7 +203,7 @@ export function GameEndModal({
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
-        className="border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-lg"
+        className="max-h-[88vh] overflow-y-auto border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-lg"
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
@@ -267,7 +267,7 @@ export function ScoreboardDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-lg">
+      <DialogContent className="max-h-[88vh] overflow-y-auto border-[#f5c036]/40 bg-[#1c1812] text-[#FEFEEE] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-display text-3xl tracking-wide text-[#f5c036]">
             PAPAN SKOR — TARGET {state.targetScore}

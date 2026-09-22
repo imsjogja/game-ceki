@@ -23,6 +23,7 @@ type VoiceState = Pick<
   | "active"
   | "starting"
   | "muted"
+  | "hasMicrophone"
   | "connectionState"
   | "peers"
   | "speakingSelf"
@@ -41,11 +42,16 @@ function connectionLabel(voice: VoiceState) {
     case "failed":
       return "KONEKSI VOICE GAGAL";
     case "connected":
+      if (!voice.hasMicrophone) {
+        return voice.peers.length > 0
+          ? `MODE DENGAR · ${voice.peers.length + 1} PEMAIN`
+          : "MODE DENGAR · MENUNGGU PEMAIN LAIN";
+      }
       return voice.peers.length > 0
         ? `${voice.peers.length + 1} PEMAIN DI VOICE`
         : "MENUNGGU PEMAIN LAIN";
     default:
-      return "VOICE BELUM AKTIF";
+      return voice.active ? "MODE DENGAR AKTIF" : "VOICE BELUM AKTIF";
   }
 }
 
@@ -62,6 +68,9 @@ function VoiceIcon({
     voice.connectionState === "reconnecting"
   ) {
     return <Loader2 className={cn("animate-spin", className)} />;
+  }
+  if (voice.active && !voice.hasMicrophone) {
+    return <Headphones className={className} />;
   }
   if (voice.muted) return <MicOff className={className} />;
   return <Mic className={className} />;
@@ -101,29 +110,47 @@ function VoicePanel({ voice }: { voice: VoiceState }) {
           <>
             <button
               type="button"
-              onClick={voice.toggleMute}
+              onClick={() => {
+                if (voice.hasMicrophone) voice.toggleMute();
+                else void voice.start();
+              }}
               className={cn(
                 "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition",
-                voice.muted
-                  ? "bg-[#c10328]/20 text-white ring-1 ring-[#c10328]/60 hover:bg-[#c10328]/30"
-                  : "bg-[#286e44]/25 text-[#FEFEEE] ring-1 ring-[#286e44]/70 hover:bg-[#286e44]/40",
-                voice.speakingSelf && !voice.muted && "speaking-glow"
+                !voice.hasMicrophone
+                  ? "bg-[#f5c036]/15 text-[#FEFEEE] ring-1 ring-[#f5c036]/55 hover:bg-[#f5c036]/25"
+                  : voice.muted
+                    ? "bg-[#c10328]/20 text-white ring-1 ring-[#c10328]/60 hover:bg-[#c10328]/30"
+                    : "bg-[#286e44]/25 text-[#FEFEEE] ring-1 ring-[#286e44]/70 hover:bg-[#286e44]/40",
+                voice.speakingSelf &&
+                  voice.hasMicrophone &&
+                  !voice.muted &&
+                  "speaking-glow"
               )}
             >
               <span
                 className={cn(
                   "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-                  voice.muted ? "bg-[#c10328]" : "bg-[#286e44]"
+                  !voice.hasMicrophone
+                    ? "bg-[#9b7416]"
+                    : voice.muted
+                      ? "bg-[#c10328]"
+                      : "bg-[#286e44]"
                 )}
               >
                 <VoiceIcon voice={voice} className="h-4 w-4" />
               </span>
               <span>
                 <span className="block text-sm font-semibold">
-                  {voice.muted ? "Mikrofon dibisukan" : "Mikrofon menyala"}
+                  {!voice.hasMicrophone
+                    ? "Mode dengar aktif"
+                    : voice.muted
+                      ? "Mikrofon dibisukan"
+                      : "Mikrofon menyala"}
                 </span>
                 <span className="block text-xs text-white/50">
-                  Ketuk untuk {voice.muted ? "menyalakan" : "membisukan"} mic
+                  {!voice.hasMicrophone
+                    ? "Anda tetap mendengar pemain lain. Ketuk untuk menyalakan mic."
+                    : `Ketuk untuk ${voice.muted ? "menyalakan" : "membisukan"} mic`}
                 </span>
               </span>
             </button>
@@ -192,7 +219,7 @@ function VoicePanel({ voice }: { voice: VoiceState }) {
               </span>
               <button
                 type="button"
-                onClick={voice.stop}
+                onClick={() => voice.stop()}
                 className="flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-white/55 transition hover:bg-[#c10328]/15 hover:text-[#e0707f]"
               >
                 <PhoneOff className="h-3.5 w-3.5" /> Keluar voice
@@ -228,35 +255,54 @@ export function VoiceControls({ voice }: { voice: VoiceChat }) {
         <button
           type="button"
           onClick={() => {
-            if (voice.active) voice.toggleMute();
+            if (voice.active && voice.hasMicrophone) voice.toggleMute();
             else if (!voice.starting) void voice.start();
           }}
           disabled={voice.starting}
           title={
             voice.active
-              ? voice.muted
+              ? !voice.hasMicrophone
+                ? "Aktifkan mikrofon (mode dengar tetap aktif)"
+                : voice.muted
                 ? "Nyalakan mikrofon"
                 : "Bisukan mikrofon"
               : "Nyalakan voice chat"
           }
           aria-label={
             voice.active
-              ? voice.muted
+              ? !voice.hasMicrophone
+                ? "Aktifkan mikrofon"
+                : voice.muted
                 ? "Nyalakan mikrofon"
                 : "Bisukan mikrofon"
               : "Nyalakan voice chat"
           }
           className={cn(
             "voice-dock-trigger",
-            voice.active ? (voice.muted ? "is-muted" : "is-active") : "is-idle",
-            voice.speakingSelf && !voice.muted && "speaking-glow"
+            voice.active
+              ? !voice.hasMicrophone
+                ? "is-listening"
+                : voice.muted
+                  ? "is-muted"
+                  : "is-active"
+              : "is-idle",
+            voice.speakingSelf &&
+              voice.hasMicrophone &&
+              !voice.muted &&
+              "speaking-glow"
           )}
         >
           <VoiceIcon voice={voice} className="h-5 w-5" />
           <span className="voice-dock-label">
-            {voice.active ? (voice.muted ? "MIC MATI" : "MIC ON") : "VOICE"}
+            {voice.active
+              ? !voice.hasMicrophone
+                ? "DENGAR"
+                : voice.muted
+                  ? "MIC MATI"
+                  : "MIC ON"
+              : "VOICE"}
           </span>
-          {voice.active && !voice.muted && (
+          {voice.active && voice.hasMicrophone && !voice.muted && (
             <span className="voice-dock-live" aria-hidden />
           )}
         </button>
@@ -319,8 +365,9 @@ export function VoiceHeaderControl({
           aria-label="Buka kontrol voice chat"
           className={cn(
             "voice-header-control relative h-8 gap-1.5 text-white/70 hover:text-[#f5c036]",
-            voice.active && !voice.muted && "text-[#7fd4a4]",
-            voice.muted && "text-[#e0707f]",
+            voice.active && !voice.hasMicrophone && "text-[#f5c036]",
+            voice.active && voice.hasMicrophone && !voice.muted && "text-[#7fd4a4]",
+            voice.hasMicrophone && voice.muted && "text-[#e0707f]",
             className
           )}
         >

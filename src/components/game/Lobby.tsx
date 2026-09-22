@@ -151,7 +151,7 @@ export function Lobby({
         </div>
 
         {/* Kursi pemain */}
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {players.map((p) => (
             <div
               key={p.seat}

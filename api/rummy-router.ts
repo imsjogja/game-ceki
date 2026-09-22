@@ -61,7 +61,7 @@ import {
 
 const cardSchema = z
   .string()
-  .regex(/^([A2-9TJQK][SHDC]|X[12])$/, "Kartu tidak valid");
+  .regex(/^(?:[A2-9TJQK][SHDC](?:~2)?|X[12])$/, "Kartu tidak valid");
 const codeSchema = z
   .string()
   .trim()

@@ -2,7 +2,7 @@
 // REMI INDONESIA (CEKI) — mesin permainan bersama server & klien.
 // Merujuk makalah "Strategi Greedy pada Permainan Kartu Remi"
 // (IF2211 Strategi Algoritma, ITB, 2020/2021):
-//  • 2–5 pemain, masing-masing 7 kartu, dek 52 + 2 joker
+//  • 2–4 pemain: 52 kartu + 2 joker; 5–8 pemain: dua dek standar (104 kartu)
 //  • Nilai: 2–10 = 5 poin, J/Q/K = 10, As = 15, Joker = nilai kartu yang diwakili
 //  • Kartu jadi (di meja) = poin PLUS; sisa kartu tangan = poin MINUS
 //  • Tutupan (kombinasi) pertama tiap pemain WAJIB seri (urutan sejenis) & tanpa joker
@@ -10,6 +10,8 @@
 //  • Tidak ada layoff — kartu tidak bisa ditempel ke kombinasi yang sudah di meja
 //  • Ambil buangan: hanya 7 kartu teratas; kartu target + minimal 2 kartu tangan
 //    harus menjadi kombinasi jadi; semua kartu di atasnya ikut terambil
+//  • Setelah ambil buangan, kartu target wajib dibuka pada giliran yang sama.
+//    Sesudah membuang satu kartu, sisa tangan maksimal 7 kartu.
 //  • Joker: tak boleh di tutupan pertama; membuang joker (terbuka) = sesi berakhir;
 //    joker di tangan saat sesi berakhir = −500; tutup tangan dengan joker = +500
 //  • Tutup tangan: kartu terakhir dibuang tertutup → sesi berakhir, +250
@@ -26,8 +28,10 @@ export type CardCode = string;
 
 /** Batas kursi permainan yang didukung oleh aturan, room, dan UI. */
 export const MIN_ROOM_PLAYERS = 2;
-export const MAX_ROOM_PLAYERS = 5;
+export const MAX_ROOM_PLAYERS = 8;
 export const CARDS_PER_PLAYER = 7;
+export const DOUBLE_DECK_PLAYER_THRESHOLD = 4;
+export const DOUBLE_DECK_CARD_COUNT = 104;
 
 export const RANK_LABEL: Record<string, string> = {
   "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
@@ -52,6 +56,25 @@ export function fullDeck(): CardCode[] {
   for (const s of SUITS) for (const r of RANKS) d.push(r + s);
   d.push(...JOKERS);
   return d;
+}
+
+/**
+ * Dua dek standar untuk meja lima hingga delapan pemain. Salinan kedua memakai suffix `~2`
+ * sebagai identitas fisik kartu, tetapi seluruh aturan dan visual tetap
+ * membaca dua karakter pertama (`AS`, `TD`, dan seterusnya).
+ *
+ * Joker sengaja tidak dimasukkan: jumlah kartu harus tepat 104 sesuai aturan
+ * meja besar, bukan 108 kartu dari dua dek yang masing-masing berjoker.
+ */
+export function doubleDeck104(): CardCode[] {
+  const standardDeck: CardCode[] = [];
+  for (const s of SUITS) for (const r of RANKS) standardDeck.push(r + s);
+  return [...standardDeck, ...standardDeck.map((card) => `${card}~2`)];
+}
+
+/** Pilih deck berdasarkan jumlah peserta sesi yang akan dimulai. */
+export function deckForPlayerCount(playerCount: number): CardCode[] {
+  return playerCount > DOUBLE_DECK_PLAYER_THRESHOLD ? doubleDeck104() : fullDeck();
 }
 
 export function shuffle<T>(arr: T[]): T[] {
@@ -213,6 +236,73 @@ export function findMelds(hand: CardCode[], meldedBefore: boolean): CardCode[][]
   return out.sort((a, b) => pts(b) - pts(a) || nj(a) - nj(b) || b.length - a.length);
 }
 
+function removeCardsFromHand(
+  hand: CardCode[],
+  cards: CardCode[]
+): CardCode[] | null {
+  const remaining = [...hand];
+  for (const card of cards) {
+    const index = remaining.indexOf(card);
+    if (index < 0) return null;
+    remaining.splice(index, 1);
+  }
+  return remaining;
+}
+
+/**
+ * Cari rangkaian meld legal untuk menuntaskan kewajiban ambil buangan.
+ * Pencarian dibatasi oleh tangan maksimal 14 kartu (7 awal + 7 buangan), dan
+ * setiap langkah selalu mengurangi minimal tiga kartu.
+ */
+export function planDiscardPickupMelds(
+  hand: CardCode[],
+  target: CardCode,
+  hasMelded: boolean,
+  openedCards = 0,
+  targetMelded = false,
+  requiredOpenedCards = 0
+): CardCode[][] | null {
+  const visited = new Set<string>();
+
+  const search = (
+    remaining: CardCode[],
+    canUseJokersAndSets: boolean,
+    opened: number,
+    hasTarget: boolean
+  ): CardCode[][] | null => {
+    if (hasTarget && opened >= requiredOpenedCards) return [];
+
+    const key = [
+      canUseJokersAndSets ? "1" : "0",
+      hasTarget ? "1" : "0",
+      Math.min(opened, requiredOpenedCards),
+      [...remaining].sort().join(","),
+    ].join("|");
+    if (visited.has(key)) return null;
+    visited.add(key);
+
+    const melds = findMelds(remaining, canUseJokersAndSets).sort(
+      (left, right) =>
+        Number(right.includes(target)) - Number(left.includes(target)) ||
+        right.length - left.length
+    );
+    for (const meld of melds) {
+      const next = removeCardsFromHand(remaining, meld);
+      if (!next) continue;
+      const rest = search(
+        next,
+        true,
+        opened + meld.length,
+        hasTarget || meld.includes(target)
+      );
+      if (rest) return [meld, ...rest];
+    }
+    return null;
+  };
+
+  return search(hand, hasMelded, openedCards, targetMelded);
+}
+
 // ── State ─────────────────────────────────────────────────────────
 export interface PlayerState {
   seat: number;
@@ -271,6 +361,24 @@ export interface RoundHistoryEntry {
   deltas: { seat: number; delta: number }[];
 }
 
+/**
+ * Kewajiban yang hanya berlaku pada giliran saat pemain mengambil tumpukan
+ * buangan. Dengan tangan awal tujuh kartu dan satu kartu buangan penutup,
+ * kedalaman `d` mensyaratkan sedikitnya `d` kartu dibuka.
+ */
+export interface DiscardPickupState {
+  /** Kartu yang dipilih dari tumpukan (bukan kartu-kartu di atasnya). */
+  target: CardCode;
+  /** 0 = kartu paling atas, 6 = kartu ketujuh dari atas. */
+  depth: number;
+  /** Total kartu yang ikut diambil: depth + 1. */
+  cardsTaken: number;
+  /** Kartu yang sudah dipindahkan ke meld pada giliran ini. */
+  openedCards: number;
+  /** Target harus benar-benar termasuk salah satu meld giliran ini. */
+  targetMelded: boolean;
+}
+
 export interface GameState {
   /** Asal meja menentukan aturan lobby dan privasi aksesnya. */
   matchType: "private" | "bot" | "stranger";
@@ -294,6 +402,8 @@ export interface GameState {
   log: { t: number; msg: string }[];
   statsRecorded: boolean;
   botActionAt: number;
+  /** null kecuali pemain aktif mengambil kartu dari tumpukan buangan. */
+  discardPickup: DiscardPickupState | null;
 }
 
 export function pushLog(state: GameState, msg: string) {
@@ -361,6 +471,7 @@ export function createRoomState(opts: {
     log: [],
     statsRecorded: false,
     botActionAt: 0,
+    discardPickup: null,
   };
   state.players.push(
     makePlayer({
@@ -457,6 +568,7 @@ function resetToWaiting(state: GameState) {
   state.roundResult = null;
   state.winnerSeat = null;
   state.botActionAt = 0;
+  state.discardPickup = null;
   for (const player of occupiedPlayers(state)) {
     player.hand = [];
     player.hasMelded = false;
@@ -502,6 +614,7 @@ export function leavePlayerFromRoom(
     pushLog(state, `${me.name} keluar dari room`);
   } else if (state.matchType === "private") {
     const leftName = me.name;
+    if (state.turnSeat === me.seat) state.discardPickup = null;
     // Kembalikan kartu yang belum selesai dimainkan ke stock dan singkirkan
     // meld pemilik kursi tersebut. Dengan begitu tidak ada kartu duplikat,
     // dan peserta tersisa dapat melanjutkan sesi tanpa "pemain hantu".
@@ -586,14 +699,16 @@ export function startRound(state: GameState) {
   if (n < MIN_ROOM_PLAYERS) throw new Error("Butuh minimal 2 pemain");
   if (n > state.maxPlayers || n > MAX_ROOM_PLAYERS)
     throw new Error(`Room hanya mendukung hingga ${MAX_ROOM_PLAYERS} pemain`);
-  if (n * CARDS_PER_PLAYER + 1 > fullDeck().length)
+  const deck = deckForPlayerCount(n);
+  if (n * CARDS_PER_PLAYER + 1 > deck.length)
     throw new Error("Kartu tidak cukup untuk memulai permainan");
   state.round += 1;
-  state.stock = shuffle(fullDeck());
+  state.stock = shuffle(deck);
   state.discard = [];
   state.closedCard = null;
   state.melds = [];
   state.roundResult = null;
+  state.discardPickup = null;
   for (const p of state.players) {
     p.hand = [];
     p.hasMelded = false;
@@ -676,6 +791,7 @@ function advanceTurn(state: GameState) {
   }
   state.turnSeat = next.seat;
   state.phase = "draw";
+  state.discardPickup = null;
   state.turnStartedAt = Date.now();
   if (state.stock.length === 0) endSessionDeckOut(state);
 }
@@ -773,6 +889,7 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
   } else {
     state.status = "roundEnd";
   }
+  state.discardPickup = null;
 }
 
 // ── Sanitasi state untuk klien ────────────────────────────────────
@@ -815,12 +932,21 @@ export interface ClientState {
   roundResult: RoundResult | null;
   roundHistory: RoundHistoryEntry[];
   log: { t: number; msg: string }[];
+  /**
+   * Hanya dikirim kepada pemain yang sedang mendapat giliran, agar kartu
+   * target dan progres kewajiban ambil buangan tidak terekspos ke lawan.
+   */
+  discardPickup: DiscardPickupState | null;
   you: { seat: number } | null;
 }
 
 export function sanitizeState(state: GameState, userId: number | null): ClientState {
   const reveal = state.status === "roundEnd" || state.status === "finished";
   const me = userId != null ? getPlayerByUser(state, userId) : undefined;
+  const discardPickup =
+    me?.seat === state.turnSeat && state.discardPickup
+      ? { ...state.discardPickup }
+      : null;
   const players: ClientPlayer[] = state.players.map((p) => {
     const showHand = !isVacantSeat(p) && (reveal || p.seat === me?.seat);
     return {
@@ -862,6 +988,7 @@ export function sanitizeState(state: GameState, userId: number | null): ClientSt
     roundResult: state.roundResult,
     roundHistory: state.roundHistory.slice(-30),
     log: state.log.slice(-60),
+    discardPickup,
     you: me ? { seat: me.seat } : null,
   };
 }
@@ -898,6 +1025,19 @@ function bestDiscardTake(state: GameState, p: PlayerState): number {
       m.includes(target),
     );
     if (combos.length === 0) continue;
+    const taken = state.discard.slice(state.discard.length - 1 - depth);
+    if (
+      !planDiscardPickupMelds(
+        [...p.hand, ...taken],
+        target,
+        p.hasMelded,
+        0,
+        false,
+        depth
+      )
+    ) {
+      continue;
+    }
     // untung = poin kombinasi jadi − beban kartu acak yang ikut terambil
     const gain = combos[0].reduce((s, c) => s + cardPoints(c), 0);
     const extra = state.discard.slice(state.discard.length - depth);
@@ -924,6 +1064,22 @@ export function botNextAction(state: GameState): BotAction {
     const depth = bestDiscardTake(state, p);
     if (depth >= 0) return { type: "drawDiscard", depth };
     return { type: "drawStock" };
+  }
+
+  const pickup = state.discardPickup;
+  if (
+    pickup &&
+    (!pickup.targetMelded || pickup.openedCards < pickup.depth)
+  ) {
+    const plan = planDiscardPickupMelds(
+      p.hand,
+      pickup.target,
+      p.hasMelded,
+      pickup.openedCards,
+      pickup.targetMelded,
+      pickup.depth
+    );
+    if (plan?.[0]) return { type: "meld", cards: plan[0] };
   }
 
   // fase play: buka kombinasi terbaik lebih dulu (greedy)
@@ -1003,6 +1159,7 @@ function drawCardInternal(
     }
     const card = state.stock.pop()!;
     p.hand.push(card);
+    state.discardPickup = null;
     state.phase = "play";
     return [card];
   }
@@ -1016,8 +1173,31 @@ function drawCardInternal(
   );
   if (combos.length === 0)
     throw new Error("Kartu itu belum menjadi kombinasi jadi dengan kartumu");
-  const taken = state.discard.splice(state.discard.length - 1 - depth);
+
+  const taken = state.discard.slice(state.discard.length - 1 - depth);
+  const plan = planDiscardPickupMelds(
+    [...p.hand, ...taken],
+    target,
+    p.hasMelded,
+    0,
+    false,
+    depth
+  );
+  if (!plan) {
+    throw new Error(
+      `Ambilan ini tidak bisa diselesaikan: buka kartu target dan minimal ${depth} kartu sebelum membuang.`
+    );
+  }
+
+  state.discard.splice(state.discard.length - 1 - depth);
   p.hand.push(...taken);
+  state.discardPickup = {
+    target,
+    depth,
+    cardsTaken: taken.length,
+    openedCards: 0,
+    targetMelded: false,
+  };
   state.phase = "play";
   pushLog(
     state,
@@ -1044,6 +1224,12 @@ function meldCardsInternal(state: GameState, cards: CardCode[]): Meld {
   meld.points = meldPoints(meld);
   state.melds.push(meld);
   p.hasMelded = true;
+  if (state.discardPickup) {
+    state.discardPickup.openedCards += cards.length;
+    if (cards.includes(state.discardPickup.target)) {
+      state.discardPickup.targetMelded = true;
+    }
+  }
   pushLog(state, `${p.name} buka ${kind}: ${cards.map(cardLabel).join(" ")} (+${meld.points})`);
   if (p.hand.length === 0) endSession(state, "tutup", p.seat);
   return meld;
@@ -1053,6 +1239,24 @@ function discardCardInternal(state: GameState, card: CardCode, faceDown: boolean
   const p = currentPlayer(state);
   const i = p.hand.indexOf(card);
   if (i < 0) throw new Error("kartu tak ada");
+  const pickup = state.discardPickup;
+  if (pickup) {
+    if (!pickup.targetMelded) {
+      throw new Error(
+        `Kartu target ${cardLabel(pickup.target)} dari buangan wajib dibuka terlebih dahulu.`
+      );
+    }
+    if (pickup.openedCards < pickup.depth) {
+      throw new Error(
+        `Ambil ${pickup.cardsTaken} kartu dari buangan: buka minimal ${pickup.depth} kartu sebelum membuang.`
+      );
+    }
+    if (p.hand.length - 1 > CARDS_PER_PLAYER) {
+      throw new Error(
+        `Sisa kartu setelah membuang harus maksimal ${CARDS_PER_PLAYER}.`
+      );
+    }
+  }
   if (faceDown) {
     if (p.hand.length !== 1) throw new Error("bukan kartu terakhir");
     p.hand.splice(i, 1);
@@ -1127,6 +1331,7 @@ export function tickGame(state: GameState): boolean {
 
 export const BOT_NAMES = [
   "Bot Kartini", "Bot Gajah", "Bot Kakek", "Bot Nyi Roro", "Bot Paijo", "Bot Slamet",
+  "Bot Srikandi",
 ];
 export const TARGET_SCORES = [250, 500, 1000];
 

@@ -39,16 +39,17 @@ export default function Room() {
       : roomQuery.data;
   const state = room?.state;
   const me = state?.you ?? null;
+  const canUseVoice = me !== null && state?.matchType !== "stranger";
   const voice = useVoiceChat({
     code: roomCode,
     seat: me?.seat ?? null,
+    enabled: canUseVoice,
   });
   const roomUnavailable =
     !room &&
     (roomQuery.error !== null ||
       realtime.error !== null ||
       (!roomQuery.isLoading && !realtime.isConnecting));
-  const canUseVoice = me !== null && state?.matchType !== "stranger";
 
   // Room yang sudah dihancurkan dapat masih terbuka di tab pemain terakhir.
   // Pakai navigasi dokumen, bukan hanya state router, agar tab yang sedang

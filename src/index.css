@@ -212,6 +212,15 @@
     width: 6.25rem;
   }
 
+  .game-stage[data-compact="true"][data-opponents="dense"] .game-opponents {
+    gap: 0;
+    padding-inline: 0.25rem;
+  }
+
+  .game-stage[data-compact="true"][data-opponents="dense"] .game-opponent-seat {
+    width: min(12vw, 4.25rem);
+  }
+
   .game-stage[data-compact="true"] .game-opponent-seat > p {
     margin-top: 0.15rem;
   }
@@ -326,6 +335,15 @@
 
   .game-stage[data-layout="portrait"] .game-opponent-seat {
     width: min(23vw, 5.5rem);
+  }
+
+  .game-stage[data-layout="portrait"][data-opponents="dense"] .game-opponents {
+    gap: 0;
+    padding-inline: 0.125rem;
+  }
+
+  .game-stage[data-layout="portrait"][data-opponents="dense"] .game-opponent-seat {
+    width: min(12vw, 4.25rem);
   }
 
   .game-stage[data-layout="portrait"] .game-opponent-seat .max-w-32 {
@@ -508,6 +526,10 @@
 
   .voice-dock-trigger.is-muted {
     color: #e0707f;
+  }
+
+  .voice-dock-trigger.is-listening {
+    color: #f5c036;
   }
 
   .voice-dock-label {

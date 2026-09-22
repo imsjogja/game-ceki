@@ -265,7 +265,7 @@ export default function Home() {
                       <label className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60">
                         JUMLAH LAWAN
                       </label>
-                      <div className="flex gap-2">
+                      <div className="grid grid-cols-4 gap-2">
                         {BOT_OPPONENT_COUNTS.map((n) => (
                           <button
                             key={n}
@@ -388,7 +388,7 @@ export default function Home() {
                         <label className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60">
                           JUMLAH LAWAN
                         </label>
-                        <div className="flex gap-2">
+                        <div className="grid grid-cols-4 gap-2">
                           {ONLINE_OPPONENT_COUNTS.map((n) => (
                             <button
                               key={n}
@@ -488,7 +488,7 @@ export default function Home() {
                       <label className="mb-1.5 block text-xs font-semibold tracking-wider text-white/60">
                         MAKS. PEMAIN
                       </label>
-                      <div className="flex gap-2">
+                      <div className="grid grid-cols-4 gap-2">
                         {ROOM_PLAYER_COUNTS.map((n) => (
                           <button
                             key={n}
@@ -849,7 +849,7 @@ export default function Home() {
           </Accordion>
         </div>
         <p className="mt-8 text-center text-xs text-white/30">
-          RemiKu — remi Indonesia (ceki) untuk 2–5 pemain · <Copy className="inline h-3 w-3" /> bagikan
+          RemiKu — remi Indonesia (ceki) untuk 2–8 pemain · <Copy className="inline h-3 w-3" /> bagikan
           kode room untuk mengundang teman
         </p>
       </section>

@@ -10,6 +10,7 @@ describe("matchmaking contract", () => {
     expect(totalPlayersFor(2)).toBe(3);
     expect(totalPlayersFor(3)).toBe(4);
     expect(totalPlayersFor(4)).toBe(5);
+    expect(totalPlayersFor(7)).toBe(8);
   });
 
   it("tidak pernah mengembalikan kebutuhan lawan negatif", () => {
@@ -18,6 +19,8 @@ describe("matchmaking contract", () => {
     expect(opponentsStillNeeded(3, 4)).toBe(0);
     expect(opponentsStillNeeded(4, 1)).toBe(4);
     expect(opponentsStillNeeded(4, 5)).toBe(0);
+    expect(opponentsStillNeeded(7, 1)).toBe(7);
+    expect(opponentsStillNeeded(7, 8)).toBe(0);
     expect(opponentsStillNeeded(1, 8)).toBe(0);
   });
 });
