@@ -6,7 +6,7 @@ import type { User } from "@db/schema";
 import {
   VOICE_HEARTBEAT_MS,
   VOICE_MAX_MESSAGE_BYTES,
-  VOICE_MAX_PEERS,
+  VOICE_MAX_PARTICIPANTS,
   VOICE_SOCKET_PATH,
   type VoiceClientEvent,
   type VoiceIceServer,
@@ -231,7 +231,7 @@ export class VoiceSignalingHub {
       break;
     }
 
-    if (room.peers.size >= VOICE_MAX_PEERS) {
+    if (room.peers.size >= VOICE_MAX_PARTICIPANTS) {
       this.error(transport, "room-full", "Voice chat room ini sudah penuh.");
       return;
     }

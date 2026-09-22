@@ -5,6 +5,7 @@ import type {
   VoiceIceServer,
   VoiceServerEvent,
 } from "@contracts/voice";
+import { VOICE_MAX_PARTICIPANTS } from "@contracts/voice";
 import {
   VoiceSignalingHub,
   type VoiceAuthorizer,
@@ -34,7 +35,7 @@ function join(peerId: string): VoiceClientEvent {
   return { type: "join", code: "ABC234", peerId };
 }
 
-function makeHub(allowedUserIds = new Set([1, 2, 3])): VoiceSignalingHub {
+function makeHub(allowedUserIds = new Set([1, 2, 3, 4, 5, 6])): VoiceSignalingHub {
   const authorize: VoiceAuthorizer = async (member, roomCode) => {
     if (roomCode !== "ABC234" || !allowedUserIds.has(member.id)) {
       throw new Error("not a player");
@@ -211,6 +212,26 @@ describe("VoiceSignalingHub", () => {
 
     expect(eventsOfType(outsider, "error")).toEqual([
       expect.objectContaining({ code: "forbidden" }),
+    ]);
+  });
+
+  it("menerima lima peserta voice dan menolak peserta keenam", async () => {
+    const hub = makeHub();
+    const participants = Array.from(
+      { length: VOICE_MAX_PARTICIPANTS },
+      () => new FakeTransport(),
+    );
+
+    for (const [index, transport] of participants.entries()) {
+      await hub.receive(transport, user(index + 1), join(`peer-${index + 1}`));
+      expect(eventsOfType(transport, "error")).toHaveLength(0);
+    }
+
+    const sixth = new FakeTransport();
+    await hub.receive(sixth, user(6), join("peer-six"));
+
+    expect(eventsOfType(sixth, "error")).toEqual([
+      expect.objectContaining({ code: "room-full" }),
     ]);
   });
 });

@@ -28,10 +28,18 @@ import {
   Eye,
   Radio,
 } from "lucide-react";
-import { TARGET_SCORES } from "@contracts/rummy";
+import { MAX_ROOM_PLAYERS, MIN_ROOM_PLAYERS, TARGET_SCORES } from "@contracts/rummy";
 import { ONLINE_OPPONENT_COUNTS } from "@contracts/matchmaking";
 
 const FAN_CARDS = ["AH", "KH", "QH", "JH", "TH"] as const;
+const ROOM_PLAYER_COUNTS = Array.from(
+  { length: MAX_ROOM_PLAYERS - MIN_ROOM_PLAYERS + 1 },
+  (_, index) => MIN_ROOM_PLAYERS + index,
+);
+const BOT_OPPONENT_COUNTS = Array.from(
+  { length: MAX_ROOM_PLAYERS - 1 },
+  (_, index) => index + 1,
+);
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
@@ -258,7 +266,7 @@ export default function Home() {
                         JUMLAH LAWAN
                       </label>
                       <div className="flex gap-2">
-                        {[1, 2, 3].map((n) => (
+                        {BOT_OPPONENT_COUNTS.map((n) => (
                           <button
                             key={n}
                             onClick={() => setBotCount(n)}
@@ -481,7 +489,7 @@ export default function Home() {
                         MAKS. PEMAIN
                       </label>
                       <div className="flex gap-2">
-                        {[2, 3, 4].map((n) => (
+                        {ROOM_PLAYER_COUNTS.map((n) => (
                           <button
                             key={n}
                             onClick={() => setMaxPlayers(n)}
@@ -841,7 +849,7 @@ export default function Home() {
           </Accordion>
         </div>
         <p className="mt-8 text-center text-xs text-white/30">
-          RemiKu — remi Indonesia (ceki) untuk 2–4 pemain · <Copy className="inline h-3 w-3" /> bagikan
+          RemiKu — remi Indonesia (ceki) untuk 2–5 pemain · <Copy className="inline h-3 w-3" /> bagikan
           kode room untuk mengundang teman
         </p>
       </section>

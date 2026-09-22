@@ -2,7 +2,7 @@ import { getDb } from "./connection";
 import { rooms, playerStats, matches, users, type Room } from "@db/schema";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
-import type { GameState } from "@contracts/rummy";
+import { isVacantSeat, type GameState } from "@contracts/rummy";
 
 export async function getRoomByCode(code: string): Promise<Room | undefined> {
   return getDb().query.rooms.findFirst({ where: eq(rooms.code, code) });
@@ -127,7 +127,9 @@ export async function maybeRecordMatch(room: Room, state: GameState) {
   if (state.status !== "finished" || state.statsRecorded) return;
   state.statsRecorded = true;
 
-  const winner = state.players.find((p) => p.seat === state.winnerSeat);
+  const winner = state.players.find(
+    (p) => p.seat === state.winnerSeat && !isVacantSeat(p),
+  );
   if (!winner) return;
 
   await getDb().insert(matches).values({
@@ -136,7 +138,7 @@ export async function maybeRecordMatch(room: Room, state: GameState) {
     winnerUserId: winner.userId,
     targetScore: state.targetScore,
     rounds: state.round,
-    players: state.players.map((p) => ({
+    players: state.players.filter((p) => !isVacantSeat(p)).map((p) => ({
       name: p.name,
       userId: p.userId,
       isBot: p.isBot,
@@ -144,7 +146,7 @@ export async function maybeRecordMatch(room: Room, state: GameState) {
     })),
   });
 
-  for (const p of state.players) {
+  for (const p of state.players.filter((player) => !isVacantSeat(player))) {
     if (p.userId == null) continue;
     const roundsWon = state.roundHistory.filter(
       (r) => r.winnerSeat === p.seat,

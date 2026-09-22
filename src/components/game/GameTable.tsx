@@ -179,7 +179,7 @@ function OpponentSeat({
   voice?: SeatVoice;
 }) {
   const isTurn = state.status === "playing" && state.turnSeat === player.seat;
-  const backs = Math.max(0, Math.min(3, player.handCount));
+  const backs = player.inRound ? Math.max(0, Math.min(3, player.handCount)) : 0;
 
   return (
     <div className="game-opponent-seat flex w-32 flex-col items-center">
@@ -268,10 +268,16 @@ function OpponentSeat({
           <span className="ml-1 text-[8px] text-white/40">BOT</span>
         )}
       </p>
-      <TurnTimer
-        startedAt={isTurn ? state.turnStartedAt : 0}
-        isBot={!isTurn || player.isBot}
-      />
+      {player.inRound ? (
+        <TurnTimer
+          startedAt={isTurn ? state.turnStartedAt : 0}
+          isBot={!isTurn || player.isBot}
+        />
+      ) : (
+        <span className="mt-0.5 rounded bg-white/10 px-1.5 py-0.5 text-[8px] font-bold tracking-wide text-white/50">
+          SESI BERIKUTNYA
+        </span>
+      )}
       {player.meldPlus > 0 && (
         <span className="mt-0.5 rounded bg-[#286e44]/50 px-1.5 py-0.5 font-num text-[10px] font-bold leading-none text-[#7fd4a4]">
           +{player.meldPlus}
@@ -294,13 +300,16 @@ export function GameTable({
   voiceBySeat?: Map<number, SeatVoice>;
   voice?: VoiceChat;
 }) {
-  useAuth();
+  const { isAuthenticated } = useAuth();
   const navigate = useNavigate();
   const stage = useStage();
   const state = room.state;
   const me = state.you;
   const myTurn =
-    !!me && state.status === "playing" && state.turnSeat === me.seat;
+    !!me &&
+    state.status === "playing" &&
+    state.turnSeat === me.seat &&
+    state.players.find(player => player.seat === me.seat)?.inRound !== false;
   const phase = state.phase;
   const selectionContext = `${state.round}:${state.turnSeat}:${phase}:${state.status}`;
   const resultKey =
@@ -392,6 +401,7 @@ export function GameTable({
   const onErr = (e: { message: string }) => toast.error(e.message);
 
   const draw = trpc.rummy.draw.useMutation({ onError: onErr });
+  const join = trpc.rummy.join.useMutation({ onError: onErr });
   const meld = trpc.rummy.meld.useMutation({
     onSuccess: () => updateSelected([]),
     onError: onErr,
@@ -413,6 +423,7 @@ export function GameTable({
 
   const anyPending =
     draw.isPending ||
+    join.isPending ||
     meld.isPending ||
     discard.isPending ||
     nextRound.isPending ||
@@ -420,6 +431,8 @@ export function GameTable({
     leave.isPending;
   const pendingLabel = draw.isPending
     ? "MENGAMBIL KARTU…"
+    : join.isPending
+      ? "DUDUK DI MEJA…"
     : meld.isPending
       ? "MEMBUKA KOMBINASI…"
       : discard.isPending
@@ -433,6 +446,10 @@ export function GameTable({
   const myPlayer: ClientPlayer | undefined = state.players.find(
     p => p.seat === me?.seat
   );
+  const waitingForNextRound =
+    !!myPlayer &&
+    myPlayer.inRound === false &&
+    (state.status === "playing" || state.status === "roundEnd");
 
   // urutan tampilan tangan: manual (drag) > urut otomatis
   const displayHand = useMemo(() => {
@@ -495,15 +512,19 @@ export function GameTable({
 
   // lawan lain, searah jarum jam dari posisiku
   const others = (() => {
-    if (!me) return state.players;
-    const n = state.players.length;
-    const list: ClientPlayer[] = [];
-    for (let i = 1; i < n; i++) {
-      const p = state.players.find(pl => pl.seat === (me.seat + i) % n);
-      if (p) list.push(p);
-    }
-    return list;
+    const seated = state.players
+      .filter(player => !player.isVacant)
+      .sort((a, b) => a.seat - b.seat);
+    if (!me) return seated;
+    const meIndex = seated.findIndex(player => player.seat === me.seat);
+    if (meIndex < 0) return seated;
+    return [...seated.slice(meIndex + 1), ...seated.slice(0, meIndex)];
   })();
+  const canSitForNextRound =
+    me === null &&
+    state.matchType === "private" &&
+    (state.status === "playing" || state.status === "roundEnd") &&
+    state.players.filter(player => !player.isVacant).length < state.maxPlayers;
 
   const currentPlayer = state.players.find(p => p.seat === state.turnSeat);
   // kaskade buangan: hanya 7 teratas yang relevan (aturan ambil maks 7)
@@ -667,7 +688,7 @@ export function GameTable({
         {/* ===== Permukaan meja: felt dan jahitan membingkai seluruh area bermain,
             termasuk bar aksi dan kartu tangan di bagian bawah. ===== */}
         <div className="game-table-surface relative mx-auto flex min-h-0 w-full flex-1 flex-col">
-          <div className="felt felt-hatch absolute inset-x-2 inset-y-0 rounded-[1.6rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)]" />
+          <div className="felt felt-hatch pointer-events-none absolute inset-x-2 inset-y-0 rounded-[1.6rem] shadow-[inset_0_0_80px_rgba(0,0,0,0.55),0_30px_60px_rgba(0,0,0,0.5)]" />
           <div className="stitch pointer-events-none absolute inset-x-5 inset-y-2.5 rounded-[1.2rem]" />
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-[0.07]">
             <div className="flex items-center gap-2">
@@ -979,7 +1000,7 @@ export function GameTable({
           </div>
 
           {/* ===== Kipas tangan saya — kartu besar, lebar, bisa diseret ===== */}
-          {me && myPlayer?.hand ? (
+          {me && myPlayer?.hand && !waitingForNextRound ? (
             <div
               className="game-hand relative flex flex-col items-center pb-2"
               style={{ height: handAreaH }}
@@ -1057,12 +1078,40 @@ export function GameTable({
             </div>
           ) : (
             <div
-              className="game-spectator-hand flex items-center justify-center"
+              className="game-spectator-hand relative z-10 flex items-center justify-center"
               style={{ height: handAreaH }}
             >
-              <p className="text-sm text-white/40">
-                Mode penonton — kamu menyaksikan meja ini secara langsung.
-              </p>
+              {waitingForNextRound ? (
+                <div className="text-center">
+                  <p className="font-display text-xl tracking-wide text-[#f5c036]">
+                    KAMU SUDAH DUDUK
+                  </p>
+                  <p className="mt-1 text-sm text-white/50">
+                    Kamu akan menerima kartu dan ikut bermain pada sesi berikutnya.
+                  </p>
+                </div>
+              ) : canSitForNextRound ? (
+                <div className="text-center">
+                  <p className="text-sm text-white/50">
+                    Ada kursi kosong. Duduk sekarang untuk ikut sesi berikutnya.
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (isAuthenticated) join.mutate({ code });
+                      else navigate("/login");
+                    }}
+                    disabled={join.isPending}
+                    className="btn-gold mt-3 h-11 px-6 text-base disabled:opacity-60"
+                  >
+                    {join.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                    {isAuthenticated ? "DUDUK UNTUK SESI BERIKUTNYA" : "MASUK UNTUK DUDUK"}
+                  </button>
+                </div>
+              ) : (
+                <p className="text-sm text-white/40">
+                  Mode penonton — kamu menyaksikan meja ini secara langsung.
+                </p>
+              )}
             </div>
           )}
         </div>

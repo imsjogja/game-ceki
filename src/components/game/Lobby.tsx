@@ -66,7 +66,8 @@ export function Lobby({
     }
   };
 
-  const emptySeats = state.maxPlayers - state.players.length;
+  const players = state.players.filter((player) => !player.isVacant);
+  const emptySeats = state.maxPlayers - players.length;
   const leaveToHome = () => {
     if (me) leave.mutate({ code });
     else navigate("/", { replace: true });
@@ -150,8 +151,8 @@ export function Lobby({
         </div>
 
         {/* Kursi pemain */}
-        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {state.players.map((p) => (
+        <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {players.map((p) => (
             <div
               key={p.seat}
               className={`relative rounded-xl border-2 p-4 text-center transition-colors ${
@@ -254,13 +255,13 @@ export function Lobby({
             isAuthenticated ? (
               <button
                 onClick={() => join.mutate({ code })}
-                disabled={join.isPending || state.players.length >= state.maxPlayers}
+                disabled={join.isPending || players.length >= state.maxPlayers}
                 className="btn-gold h-14 px-10 text-2xl disabled:opacity-60"
               >
                 {join.isPending && <Loader2 className="h-5 w-5 animate-spin" />}
                 {join.isPending
                   ? "BERGABUNG..."
-                  : state.players.length >= state.maxPlayers
+                  : players.length >= state.maxPlayers
                     ? "ROOM PENUH"
                     : "GABUNG ROOM"}
               </button>
@@ -272,7 +273,7 @@ export function Lobby({
           ) : isHost ? (
             <button
               onClick={() => start.mutate({ code })}
-              disabled={start.isPending || state.players.length < 2}
+              disabled={start.isPending || players.length < 2}
               className="btn-gold h-14 px-10 text-2xl disabled:opacity-60"
             >
               {start.isPending ? (
@@ -282,7 +283,7 @@ export function Lobby({
               )}
               {start.isPending
                 ? "MEMULAI..."
-                : state.players.length < 2
+                : players.length < 2
                   ? "BUTUH MIN. 2 PEMAIN"
                   : "MULAI PERMAINAN"}
             </button>

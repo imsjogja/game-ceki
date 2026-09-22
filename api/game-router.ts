@@ -14,6 +14,7 @@ import {
 import {
   TURN_TIMEOUT_MS,
   getPlayerByUser,
+  isRoundParticipant,
   leavePlayerFromRoom,
   sanitizeState,
   tickGame,
@@ -469,8 +470,10 @@ export function nextGameWakeAt(
   now = Date.now()
 ): number | null {
   if (state.status !== "playing") return null;
-  const current = state.players[state.turnSeat];
-  if (!current) return null;
+  const current = state.players.find(player => player.seat === state.turnSeat);
+  // Scheduler segera membangunkan engine untuk membetulkan snapshot lama yang
+  // masih menunjuk ke kursi kosong/pemain sesi berikutnya.
+  if (!current || !isRoundParticipant(current)) return now;
   if (current.isBot || !current.connected) {
     return Math.max(now, state.botActionAt || 0);
   }

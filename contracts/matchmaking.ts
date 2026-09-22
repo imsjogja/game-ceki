@@ -1,4 +1,4 @@
-export const ONLINE_OPPONENT_COUNTS = [1, 2, 3] as const;
+export const ONLINE_OPPONENT_COUNTS = [1, 2, 3, 4] as const;
 export type OnlineOpponentCount = (typeof ONLINE_OPPONENT_COUNTS)[number];
 
 export const MATCHMAKING_QUEUE_TTL_MS = 90_000;

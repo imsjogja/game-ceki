@@ -5,9 +5,28 @@ import { PlayingCard } from "@/components/game/PlayingCard";
 import { Trophy, RefreshCw, Home, ArrowRight, Flame, Loader2 } from "lucide-react";
 import type { ClientState, CardCode, SessionReason } from "@contracts/rummy";
 
-function PlayerMini({ state, seat }: { state: ClientState; seat: number }) {
+function PlayerMini({
+  state,
+  seat,
+  fallbackName,
+}: {
+  state: ClientState;
+  seat: number;
+  fallbackName?: string;
+}) {
   const p = state.players.find((x) => x.seat === seat);
-  if (!p) return null;
+  if (!p || p.isVacant) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 font-display text-sm text-white/40">
+          ?
+        </span>
+        <span className="truncate text-sm font-semibold text-white/60">
+          {fallbackName ?? "Pemain keluar"}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2">
       {p.avatar ? (
@@ -25,7 +44,8 @@ function PlayerMini({ state, seat }: { state: ClientState; seat: number }) {
 function reasonTitle(state: ClientState): { title: string; sub: string } {
   const r = state.roundResult;
   if (!r) return { title: "SESI BERAKHIR", sub: "" };
-  const closer = r.winnerSeat !== null ? state.players.find((p) => p.seat === r.winnerSeat) : null;
+  const closer =
+    r.winnerSeat !== null ? r.deltas.find((delta) => delta.seat === r.winnerSeat) : null;
   switch (r.reason as SessionReason) {
     case "tutup":
       return { title: `${closer?.name ?? ""} TUTUP TANGAN!`, sub: "+250 poin tutup" };
@@ -89,7 +109,7 @@ export function RoundEndModal({
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <PlayerMini state={state} seat={d.seat} />
+                  <PlayerMini state={state} seat={d.seat} fallbackName={d.name} />
                   <div className="text-right">
                     <span
                       className={`font-num text-lg font-bold ${
@@ -129,7 +149,8 @@ export function RoundEndModal({
             SKOR — TARGET {state.targetScore}
           </p>
           <div className="flex justify-center gap-6">
-            {[...state.players]
+            {state.players
+              .filter((player) => !player.isVacant)
               .sort((a, b) => b.score - a.score)
               .map((p) => (
                 <div key={p.seat} className="text-center">
@@ -172,8 +193,12 @@ export function GameEndModal({
   open: boolean;
   onClose: () => void;
 }) {
-  const champion = state.players.find((p) => p.seat === state.winnerSeat);
-  const standings = [...state.players].sort((a, b) => b.score - a.score);
+  const champion = state.players.find(
+    (p) => p.seat === state.winnerSeat && !p.isVacant,
+  );
+  const standings = state.players
+    .filter((player) => !player.isVacant)
+    .sort((a, b) => b.score - a.score);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -249,7 +274,8 @@ export function ScoreboardDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
-          {[...state.players]
+          {state.players
+            .filter((player) => !player.isVacant)
             .sort((a, b) => b.score - a.score)
             .map((p, i) => (
               <div key={p.seat} className="flex items-center gap-3 rounded-lg bg-black/30 px-3 py-2">

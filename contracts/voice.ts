@@ -1,3 +1,5 @@
+import { MAX_ROOM_PLAYERS } from "./rummy";
+
 // ------------------------------------------------------------------
 // Kontrak signaling voice chat RemiKu.
 //
@@ -12,8 +14,8 @@ export const VOICE_SOCKET_PATH = "/api/voice";
 /** Detak WebSocket server untuk mendeteksi socket yang putus diam-diam. */
 export const VOICE_HEARTBEAT_MS = 25_000;
 
-/** Maksimum manusia dalam satu permainan saat ini adalah empat pemain. */
-export const VOICE_MAX_PEERS = 4;
+/** Kapasitas total peserta voice mengikuti kapasitas room permainan. */
+export const VOICE_MAX_PARTICIPANTS = MAX_ROOM_PLAYERS;
 
 /** Batas payload signaling WebSocket agar tidak menjadi jalur upload umum. */
 export const VOICE_MAX_MESSAGE_BYTES = 32 * 1024;

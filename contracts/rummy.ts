@@ -2,7 +2,7 @@
 // REMI INDONESIA (CEKI) — mesin permainan bersama server & klien.
 // Merujuk makalah "Strategi Greedy pada Permainan Kartu Remi"
 // (IF2211 Strategi Algoritma, ITB, 2020/2021):
-//  • 2–4 pemain, masing-masing 7 kartu, dek 52 + 2 joker
+//  • 2–5 pemain, masing-masing 7 kartu, dek 52 + 2 joker
 //  • Nilai: 2–10 = 5 poin, J/Q/K = 10, As = 15, Joker = nilai kartu yang diwakili
 //  • Kartu jadi (di meja) = poin PLUS; sisa kartu tangan = poin MINUS
 //  • Tutupan (kombinasi) pertama tiap pemain WAJIB seri (urutan sejenis) & tanpa joker
@@ -23,6 +23,11 @@ export type Suit = (typeof SUITS)[number];
 export const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"] as const;
 /** Kode kartu: "AS"=As♠ … "TD"=10♦ … "X1"/"X2" = joker */
 export type CardCode = string;
+
+/** Batas kursi permainan yang didukung oleh aturan, room, dan UI. */
+export const MIN_ROOM_PLAYERS = 2;
+export const MAX_ROOM_PLAYERS = 5;
+export const CARDS_PER_PLAYER = 7;
 
 export const RANK_LABEL: Record<string, string> = {
   "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
@@ -215,6 +220,16 @@ export interface PlayerState {
   name: string;
   avatar: string | null;
   isBot: boolean;
+  /**
+   * Kursi yang ditinggalkan pada private room tetap dipertahankan agar dapat
+   * diisi pemain lain tanpa mengubah urutan meja yang sedang berjalan.
+   */
+  isVacant: boolean;
+  /**
+   * Pemain yang duduk saat sesi sedang berjalan baru menerima kartu dan masuk
+   * rotasi giliran pada sesi berikutnya.
+   */
+  inRound: boolean;
   connected: boolean;
   hand: CardCode[];
   score: number;
@@ -299,6 +314,8 @@ export function makePlayer(p: {
     name: p.name,
     avatar: p.avatar,
     isBot: p.isBot,
+    isVacant: false,
+    inRound: true,
     connected: true,
     hand: [],
     score: 0,
@@ -316,6 +333,13 @@ export function createRoomState(opts: {
   maxPlayers: number;
   matchType?: GameState["matchType"];
 }): GameState {
+  if (
+    !Number.isInteger(opts.maxPlayers) ||
+    opts.maxPlayers < MIN_ROOM_PLAYERS ||
+    opts.maxPlayers > MAX_ROOM_PLAYERS
+  ) {
+    throw new Error(`Room harus memiliki ${MIN_ROOM_PLAYERS}–${MAX_ROOM_PLAYERS} pemain`);
+  }
   const state: GameState = {
     matchType: opts.matchType ?? "private",
     status: "waiting",
@@ -351,14 +375,103 @@ export function createRoomState(opts: {
 }
 
 export function getPlayerByUser(state: GameState, userId: number): PlayerState | undefined {
-  return state.players.find((p) => p.userId === userId);
+  return state.players.find((p) => !isVacantSeat(p) && p.userId === userId);
+}
+
+/** State lama yang belum memiliki field baru dianggap sebagai kursi terisi. */
+export function isVacantSeat(player: Pick<PlayerState, "isVacant">): boolean {
+  return player.isVacant === true;
+}
+
+/** Peserta yang mendapat kartu dan boleh mengambil giliran pada sesi aktif. */
+export function isRoundParticipant(
+  player: Pick<PlayerState, "isVacant" | "inRound">,
+): boolean {
+  return !isVacantSeat(player) && player.inRound !== false;
+}
+
+export function occupiedPlayers(state: GameState): PlayerState[] {
+  return state.players.filter((player) => !isVacantSeat(player));
+}
+
+function roundParticipants(state: GameState): PlayerState[] {
+  return occupiedPlayers(state)
+    .filter(isRoundParticipant)
+    .sort((a, b) => a.seat - b.seat);
+}
+
+function playerAtSeat(state: GameState, seat: number): PlayerState | undefined {
+  return state.players.find((player) => player.seat === seat);
+}
+
+function nextRoundParticipant(state: GameState, seat: number): PlayerState | undefined {
+  const players = roundParticipants(state);
+  if (players.length === 0) return undefined;
+  return players.find((player) => player.seat > seat) ?? players[0];
+}
+
+/** Kursi pertama yang belum terisi, termasuk kursi yang belum pernah dibuat. */
+export function firstOpenSeat(state: GameState): number | null {
+  for (let seat = 0; seat < state.maxPlayers; seat++) {
+    const player = playerAtSeat(state, seat);
+    if (!player || isVacantSeat(player)) return seat;
+  }
+  return null;
+}
+
+/**
+ * Menempatkan pemain/bot ke kursi kosong. Pada sesi aktif, pemain baru
+ * menunggu sesi berikutnya agar tidak menerima kartu di tengah permainan.
+ */
+export function addPlayerToRoom(
+  state: GameState,
+  input: Omit<Parameters<typeof makePlayer>[0], "seat">,
+): { player: PlayerState; joinsNextRound: boolean } {
+  if (occupiedPlayers(state).length >= state.maxPlayers) {
+    throw new Error("Room penuh");
+  }
+  const seat = firstOpenSeat(state);
+  if (seat === null) throw new Error("Kursi room tidak tersedia");
+
+  const joinsNextRound = state.status === "playing" || state.status === "roundEnd";
+  const next = makePlayer({ ...input, seat });
+  next.inRound = !joinsNextRound;
+
+  const vacant = playerAtSeat(state, seat);
+  if (vacant) Object.assign(vacant, next);
+  else {
+    state.players.push(next);
+    state.players.sort((a, b) => a.seat - b.seat);
+  }
+
+  return { player: vacant ?? next, joinsNextRound };
+}
+
+function resetToWaiting(state: GameState) {
+  state.status = "waiting";
+  state.phase = "draw";
+  state.stock = [];
+  state.discard = [];
+  state.closedCard = null;
+  state.melds = [];
+  state.roundResult = null;
+  state.winnerSeat = null;
+  state.botActionAt = 0;
+  for (const player of occupiedPlayers(state)) {
+    player.hand = [];
+    player.hasMelded = false;
+    player.lastRoundPoints = 0;
+    player.inRound = true;
+  }
 }
 
 /**
  * Keluarkan pemain manusia dari sebuah room.
  *
  * Lobby merapikan kursi yang tersisa. Saat permainan sudah dimulai, kursi
- * pemain diambil alih bot supaya pemain lain tetap dapat menyelesaikan sesi.
+ * private dibiarkan kosong supaya dapat diisi pemain baru pada sesi berikutnya.
+ * Match bot dan lawan online mempertahankan pengganti bot agar pertandingan
+ * yang tidak menerima peserta baru tidak macet.
  * `shouldDestroy` bernilai true bila tidak ada manusia yang tersisa; pemanggil
  * harus menghapus room tersebut secara atomik dari penyimpanan.
  */
@@ -370,19 +483,77 @@ export function leavePlayerFromRoom(
   if (!me) {
     return {
       didLeave: false,
-      shouldDestroy: !state.players.some((player) => !player.isBot),
+      shouldDestroy: !occupiedPlayers(state).some(
+        (player) => !player.isBot && player.userId !== null,
+      ),
     };
   }
 
   if (state.status === "waiting") {
     state.players = state.players
-      .filter((player) => player.seat !== me.seat)
+      .filter((player) => player.seat !== me.seat && !isVacantSeat(player))
       .map((player, seat) => ({ ...player, seat }));
     if (state.hostSeat === me.seat) {
-      const nextHuman = state.players.find((player) => !player.isBot);
+      const nextHuman = state.players.find(
+        (player) => !player.isBot && player.userId !== null,
+      );
       state.hostSeat = nextHuman ? nextHuman.seat : 0;
     }
     pushLog(state, `${me.name} keluar dari room`);
+  } else if (state.matchType === "private") {
+    const leftName = me.name;
+    // Kembalikan kartu yang belum selesai dimainkan ke stock dan singkirkan
+    // meld pemilik kursi tersebut. Dengan begitu tidak ada kartu duplikat,
+    // dan peserta tersisa dapat melanjutkan sesi tanpa "pemain hantu".
+    if (state.status === "playing") {
+      const returnedCards = [
+        ...me.hand,
+        ...state.melds
+          .filter((meld) => meld.ownerSeat === me.seat)
+          .flatMap((meld) => meld.cards),
+      ];
+      state.melds = state.melds.filter((meld) => meld.ownerSeat !== me.seat);
+      if (returnedCards.length > 0) state.stock = shuffle([...state.stock, ...returnedCards]);
+    }
+
+    Object.assign(me, {
+      userId: null,
+      name: "Kursi kosong",
+      avatar: null,
+      isBot: false,
+      isVacant: true,
+      inRound: false,
+      connected: false,
+      hand: [],
+      score: 0,
+      lastRoundPoints: 0,
+      hasMelded: false,
+      joinedAt: Date.now(),
+    });
+
+    if (state.hostSeat === me.seat) {
+      const nextHuman = occupiedPlayers(state).find(
+        (player) => !player.isBot && player.userId !== null,
+      );
+      if (nextHuman) state.hostSeat = nextHuman.seat;
+    }
+
+    const participants = roundParticipants(state);
+    if (state.status === "playing" && participants.length < MIN_ROOM_PLAYERS) {
+      resetToWaiting(state);
+      pushLog(state, `${leftName} keluar — sesi dibatalkan, menunggu pemain.`);
+    } else if (state.status === "playing" && state.turnSeat === me.seat) {
+      const next = nextRoundParticipant(state, me.seat);
+      if (next) {
+        state.turnSeat = next.seat;
+        state.phase = "draw";
+        state.turnStartedAt = Date.now();
+        state.botActionAt = 0;
+      }
+      pushLog(state, `${leftName} keluar — kursinya kosong.`);
+    } else {
+      pushLog(state, `${leftName} keluar — kursinya kosong.`);
+    }
   } else {
     // Permainan yang masih memiliki pemain manusia tetap berjalan dengan bot.
     me.isBot = true;
@@ -390,9 +561,11 @@ export function leavePlayerFromRoom(
     me.avatar = null;
     me.connected = false;
     me.name = me.name.startsWith("Bot") ? me.name : `${me.name} (Auto)`;
-    const host = state.players.find((player) => player.seat === state.hostSeat);
+    const host = playerAtSeat(state, state.hostSeat);
     if (host?.isBot) {
-      const nextHuman = state.players.find((player) => !player.isBot);
+      const nextHuman = state.players.find(
+        (player) => !player.isBot && player.userId !== null,
+      );
       if (nextHuman) state.hostSeat = nextHuman.seat;
     }
     pushLog(state, "Seorang pemain keluar — digantikan bot");
@@ -400,14 +573,21 @@ export function leavePlayerFromRoom(
 
   return {
     didLeave: true,
-    shouldDestroy: !state.players.some((player) => !player.isBot),
+    shouldDestroy: !occupiedPlayers(state).some(
+      (player) => !player.isBot && player.userId !== null,
+    ),
   };
 }
 
 // ── Siklus sesi ───────────────────────────────────────────────────
 export function startRound(state: GameState) {
-  const n = state.players.length;
-  if (n < 2) throw new Error("Butuh minimal 2 pemain");
+  const participants = occupiedPlayers(state).sort((a, b) => a.seat - b.seat);
+  const n = participants.length;
+  if (n < MIN_ROOM_PLAYERS) throw new Error("Butuh minimal 2 pemain");
+  if (n > state.maxPlayers || n > MAX_ROOM_PLAYERS)
+    throw new Error(`Room hanya mendukung hingga ${MAX_ROOM_PLAYERS} pemain`);
+  if (n * CARDS_PER_PLAYER + 1 > fullDeck().length)
+    throw new Error("Kartu tidak cukup untuk memulai permainan");
   state.round += 1;
   state.stock = shuffle(fullDeck());
   state.discard = [];
@@ -418,26 +598,31 @@ export function startRound(state: GameState) {
     p.hand = [];
     p.hasMelded = false;
     p.lastRoundPoints = 0;
+    if (!isVacantSeat(p)) p.inRound = true;
   }
-  for (let i = 0; i < 7; i++)
-    for (const p of state.players) p.hand.push(state.stock.pop()!);
+  for (let i = 0; i < CARDS_PER_PLAYER; i++)
+    for (const p of participants) p.hand.push(state.stock.pop()!);
   state.discard.push(state.stock.pop()!);
   // sesi 1 mulai dari seat 0; sesi berikutnya dari pemegang skor tertinggi
-  if (state.round === 1) state.turnSeat = 0;
+  if (state.round === 1) state.turnSeat = participants[0].seat;
   else {
-    let best = 0;
-    for (const p of state.players) if (p.score > state.players[best].score) best = p.seat;
-    state.turnSeat = best;
+    let best = participants[0];
+    for (const p of participants) if (p.score > best.score) best = p;
+    state.turnSeat = best.seat;
   }
   state.phase = "draw";
   state.turnStartedAt = Date.now();
   state.botActionAt = 0;
   state.status = "playing";
-  pushLog(state, `— Sesi ${state.round} dimulai · ${n} pemain × 7 kartu —`);
+  pushLog(state, `— Sesi ${state.round} dimulai · ${n} pemain × ${CARDS_PER_PLAYER} kartu —`);
 }
 
 function currentPlayer(state: GameState): PlayerState {
-  return state.players[state.turnSeat];
+  const player = playerAtSeat(state, state.turnSeat);
+  if (!player || !isRoundParticipant(player)) {
+    throw new Error("Giliran pemain tidak valid");
+  }
+  return player;
 }
 
 function endSessionDeckOut(state: GameState) {
@@ -484,15 +669,21 @@ export function discardCard(
 }
 
 function advanceTurn(state: GameState) {
-  state.turnSeat = (state.turnSeat + 1) % state.players.length;
+  const next = nextRoundParticipant(state, state.turnSeat);
+  if (!next) {
+    resetToWaiting(state);
+    return;
+  }
+  state.turnSeat = next.seat;
   state.phase = "draw";
   state.turnStartedAt = Date.now();
   if (state.stock.length === 0) endSessionDeckOut(state);
 }
 
 function endSession(state: GameState, reason: SessionReason, closerSeat: number | null) {
-  const prevScores = state.players.map((p) => p.score);
-  const deltas: SessionDelta[] = state.players.map((p) => {
+  const participants = roundParticipants(state);
+  const prevScores = new Map(participants.map((player) => [player.seat, player.score]));
+  const deltas: SessionDelta[] = participants.map((p) => {
     const meldPlus = state.melds
       .filter((m) => m.ownerSeat === p.seat)
       .reduce((s, m) => s + m.points, 0);
@@ -516,12 +707,12 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
 
   // aturan tersalip: jika pemain X yang tadinya di bawah/diimbangi Y kini melampaui Y,
   // maka skor Y hangus ke 0 — berlaku untuk skor positif maupun negatif
-  for (const y of state.players) {
-    const prevY = prevScores[y.seat];
-    const salip = state.players.some(
+  for (const y of participants) {
+    const prevY = prevScores.get(y.seat) ?? y.score;
+    const salip = participants.some(
       (x) =>
         x.seat !== y.seat &&
-        prevScores[x.seat] <= prevY &&
+        (prevScores.get(x.seat) ?? x.score) <= prevY &&
         x.score > y.score,
     );
     if (salip && y.score !== 0) {
@@ -540,7 +731,7 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
   // target tercapai?
   let targetReachedBy: number | null = null;
   let best = -Infinity;
-  for (const p of state.players) {
+  for (const p of participants) {
     if (p.score >= state.targetScore && p.score > best) {
       best = p.score;
       targetReachedBy = p.seat;
@@ -556,9 +747,9 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
   };
   const reasonLabel =
     reason === "tutup"
-      ? `${state.players[closerSeat!].name} tutup tangan`
+      ? `${playerAtSeat(state, closerSeat!)?.name ?? "Pemain"} tutup tangan`
       : reason === "tutupJoker"
-        ? `${state.players[closerSeat!].name} tutup dengan joker`
+        ? `${playerAtSeat(state, closerSeat!)?.name ?? "Pemain"} tutup dengan joker`
         : reason === "jokerDiscarded"
           ? "Joker dibuang terbuka"
           : "Deck habis";
@@ -575,7 +766,9 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
     state.winnerSeat = targetReachedBy;
     pushLog(
       state,
-      `${state.players[targetReachedBy].name} mencapai ${state.players[targetReachedBy].score} poin — MENANG!`,
+      `${playerAtSeat(state, targetReachedBy)?.name ?? "Pemain"} mencapai ${
+        playerAtSeat(state, targetReachedBy)?.score ?? 0
+      } poin — MENANG!`,
     );
   } else {
     state.status = "roundEnd";
@@ -589,6 +782,8 @@ export interface ClientPlayer {
   name: string;
   avatar: string | null;
   isBot: boolean;
+  isVacant: boolean;
+  inRound: boolean;
   isHost: boolean;
   handCount: number;
   hand?: CardCode[];
@@ -627,13 +822,15 @@ export function sanitizeState(state: GameState, userId: number | null): ClientSt
   const reveal = state.status === "roundEnd" || state.status === "finished";
   const me = userId != null ? getPlayerByUser(state, userId) : undefined;
   const players: ClientPlayer[] = state.players.map((p) => {
-    const showHand = reveal || p.seat === me?.seat;
+    const showHand = !isVacantSeat(p) && (reveal || p.seat === me?.seat);
     return {
       seat: p.seat,
       userId: p.userId,
       name: p.name,
       avatar: p.avatar,
       isBot: p.isBot,
+      isVacant: isVacantSeat(p),
+      inRound: p.inRound !== false,
       isHost: p.seat === state.hostSeat,
       handCount: p.hand.length,
       hand: showHand ? [...p.hand] : undefined,
@@ -889,7 +1086,23 @@ export function tickGame(state: GameState): boolean {
   let acted = false;
   let guard = 0;
   while (state.status === "playing" && guard++ < 50) {
-    const p = state.players[state.turnSeat];
+    const p = playerAtSeat(state, state.turnSeat);
+    // Kursi yang sengaja dikosongkan dan pemain yang baru duduk tidak pernah
+    // menjadi lawan bot/timeout. Lewati defensif bila snapshot lama masih
+    // menunjuk ke kursi tersebut.
+    if (!p || !isRoundParticipant(p)) {
+      const next = nextRoundParticipant(state, state.turnSeat);
+      if (!next || next.seat === state.turnSeat) {
+        resetToWaiting(state);
+        return true;
+      }
+      state.turnSeat = next.seat;
+      state.phase = "draw";
+      state.turnStartedAt = Date.now();
+      state.botActionAt = 0;
+      acted = true;
+      continue;
+    }
     if (p.isBot || !p.connected) {
       if (now < state.botActionAt) break;
       const moved = botPlayStep(state);

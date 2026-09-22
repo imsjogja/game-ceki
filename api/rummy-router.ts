@@ -30,8 +30,11 @@ import {
   createRoomState,
   generateRoomCode,
   getPlayerByUser,
+  addPlayerToRoom,
   leavePlayerFromRoom,
   makePlayer,
+  occupiedPlayers,
+  isVacantSeat,
   startRound,
   drawCard,
   meldCards,
@@ -39,6 +42,8 @@ import {
   sanitizeState,
   pushLog,
   BOT_NAMES,
+  MAX_ROOM_PLAYERS,
+  MIN_ROOM_PLAYERS,
   TARGET_SCORES,
   type GameState,
 } from "@contracts/rummy";
@@ -181,7 +186,7 @@ export const rummyRouter = createRouter({
           .number()
           .refine(n => (TARGET_SCORES as readonly number[]).includes(n))
           .default(500),
-        maxPlayers: z.number().min(2).max(4).default(4),
+        maxPlayers: z.number().int().min(MIN_ROOM_PLAYERS).max(MAX_ROOM_PLAYERS).default(4),
         name: z.string().trim().max(48).optional(),
       })
     )
@@ -218,7 +223,7 @@ export const rummyRouter = createRouter({
   quickPlay: authedQuery
     .input(
       z.object({
-        bots: z.number().int().min(1).max(3).default(1),
+        bots: z.number().int().min(1).max(MAX_ROOM_PLAYERS - 1).default(1),
         targetScore: z
           .number()
           .refine(n => (TARGET_SCORES as readonly number[]).includes(n))
@@ -271,24 +276,36 @@ export const rummyRouter = createRouter({
     .mutation(async ({ ctx, input }) => {
       const result = await withRoom(input.code, state => {
         const existing = getPlayerByUser(state, ctx.user.id);
-        if (existing) return { seat: existing.seat, already: true };
-        if (state.status !== "waiting")
+        if (existing) {
+          return {
+            seat: existing.seat,
+            already: true,
+            joinsNextRound: existing.inRound === false,
+          };
+        }
+        const canJoinActivePrivateRoom =
+          state.matchType === "private" &&
+          (state.status === "playing" || state.status === "roundEnd");
+        if (state.status !== "waiting" && !canJoinActivePrivateRoom)
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Permainan sudah dimulai di room ini",
           });
-        if (state.players.length >= state.maxPlayers)
+        if (occupiedPlayers(state).length >= state.maxPlayers)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Room penuh" });
-        const player = makePlayer({
-          seat: state.players.length,
+        const { player, joinsNextRound } = addPlayerToRoom(state, {
           userId: ctx.user.id,
           name: ctx.user.name ?? "Pemain",
           avatar: ctx.user.avatar ?? null,
           isBot: false,
         });
-        state.players.push(player);
-        pushLog(state, `${ctx.user.name ?? "Pemain"} bergabung`);
-        return { seat: player.seat, already: false };
+        pushLog(
+          state,
+          joinsNextRound
+            ? `${ctx.user.name ?? "Pemain"} duduk — ikut sesi berikutnya`
+            : `${ctx.user.name ?? "Pemain"} bergabung`,
+        );
+        return { seat: player.seat, already: false, joinsNextRound };
       });
       await synchronizeRealtimeRoom(input.code);
       return result;
@@ -372,21 +389,18 @@ export const rummyRouter = createRouter({
             code: "BAD_REQUEST",
             message: "Permainan sudah dimulai",
           });
-        if (state.players.length >= state.maxPlayers)
+        if (occupiedPlayers(state).length >= state.maxPlayers)
           throw new TRPCError({ code: "BAD_REQUEST", message: "Kursi penuh" });
-        const used = new Set(state.players.map(p => p.name));
+        const used = new Set(occupiedPlayers(state).map(p => p.name));
         const name =
           BOT_NAMES.find(n => !used.has(n)) ??
-          `Bot ${state.players.length + 1}`;
-        state.players.push(
-          makePlayer({
-            seat: state.players.length,
-            userId: null,
-            name,
-            avatar: null,
-            isBot: true,
-          })
-        );
+          `Bot ${occupiedPlayers(state).length + 1}`;
+        addPlayerToRoom(state, {
+          userId: null,
+          name,
+          avatar: null,
+          isBot: true,
+        });
         pushLog(state, `${name} bergabung`);
         return { ok: true };
       });
@@ -395,7 +409,10 @@ export const rummyRouter = createRouter({
     }),
 
   removePlayer: authedQuery
-    .input(z.object({ code: codeSchema, seat: z.number().int().min(0).max(3) }))
+    .input(z.object({
+      code: codeSchema,
+      seat: z.number().int().min(0).max(MAX_ROOM_PLAYERS - 1),
+    }))
     .mutation(async ({ ctx, input }) => {
       const result = await withRoom(input.code, state => {
         assertHost(state, ctx.user.id);
@@ -410,11 +427,12 @@ export const rummyRouter = createRouter({
             message: "Host tidak bisa dikeluarkan",
           });
         const target = state.players.find(p => p.seat === input.seat);
-        if (!target) return { removedUserId: null };
+        if (!target || isVacantSeat(target)) return { removedUserId: null };
         state.players = state.players
-          .filter(p => p.seat !== input.seat)
+          .filter(p => p.seat !== input.seat && !isVacantSeat(p))
           .map((p, i) => ({ ...p, seat: i }));
-        state.hostSeat = 0;
+        state.hostSeat =
+          state.players.find(p => p.userId === ctx.user.id)?.seat ?? 0;
         pushLog(state, `${target.name} dikeluarkan dari room`);
         return { removedUserId: target.isBot ? null : target.userId };
       });
@@ -520,7 +538,15 @@ export const rummyRouter = createRouter({
         state.winnerSeat = null;
         state.statsRecorded = false;
         state.botActionAt = 0;
-        const human = state.players.filter(p => !p.isBot);
+        state.players = occupiedPlayers(state)
+          .map((player, seat) => ({
+            ...player,
+            seat,
+            inRound: true,
+          }));
+        const human = state.players.filter(
+          p => !p.isBot && p.userId !== null,
+        );
         state.hostSeat = human.length > 0 ? human[0].seat : 0;
         for (const p of state.players) {
           p.hand = [];
