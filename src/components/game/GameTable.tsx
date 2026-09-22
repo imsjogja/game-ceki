@@ -39,7 +39,6 @@ import {
 import {
   validateMeld,
   findMelds,
-  cardLabel,
   isJoker,
   planDiscardPickupMelds,
   sortHand,
@@ -200,7 +199,12 @@ function OpponentSeat({
         dense ? "game-opponent-seat-dense w-20" : "w-32"
       )}
     >
-      <div className={cn("flex items-center", dense ? "flex-col gap-0.5" : "gap-2")}>
+      <div
+        className={cn(
+          "flex items-center",
+          dense ? "flex-col gap-0.5" : "gap-2"
+        )}
+      >
         <div
           className={cn(
             "relative rounded-full transition-transform duration-300",
@@ -478,15 +482,15 @@ export function GameTable({
     ? "MENGAMBIL KARTU…"
     : join.isPending
       ? "DUDUK DI MEJA…"
-    : meld.isPending
-      ? "MEMBUKA KOMBINASI…"
-      : discard.isPending
-        ? "MEMBUANG KARTU…"
-        : nextRound.isPending
-          ? "MEMULAI SESI BARU…"
-          : leave.isPending
-            ? "KELUAR ROOM…"
-            : "MEMPROSES…";
+      : meld.isPending
+        ? "MEMBUKA KOMBINASI…"
+        : discard.isPending
+          ? "MEMBUANG KARTU…"
+          : nextRound.isPending
+            ? "MEMULAI SESI BARU…"
+            : leave.isPending
+              ? "KELUAR ROOM…"
+              : "MEMPROSES…";
 
   const myPlayer: ClientPlayer | undefined = state.players.find(
     p => p.seat === me?.seat
@@ -524,9 +528,7 @@ export function GameTable({
   const canDiscard = myTurn && phase === "play" && oneSelected && handCount > 1;
   const discardPickup = state.discardPickup;
   const discardPickupResolved =
-    !discardPickup ||
-    (discardPickup.targetMelded &&
-      discardPickup.openedCards >= discardPickup.depth);
+    !discardPickup || discardPickup.openedCards >= discardPickup.depth;
   const pickupCardsStillRequired = discardPickup
     ? Math.max(0, discardPickup.depth - discardPickup.openedCards)
     : 0;
@@ -546,10 +548,8 @@ export function GameTable({
     return Boolean(
       planDiscardPickupMelds(
         [...myPlayer.hand, ...taken],
-        target,
         myPlayer.hasMelded,
         0,
-        false,
         depth
       )
     );
@@ -1056,9 +1056,7 @@ export function GameTable({
                   )}
                   {discardPickup && !discardPickupResolved && (
                     <span className="rounded-full bg-[#c10328]/20 px-3 py-1.5 text-[11px] font-semibold text-[#ffd2d9] ring-1 ring-[#c10328]/50">
-                      {!discardPickup.targetMelded
-                        ? `WAJIB BUKA ${cardLabel(discardPickup.target)}`
-                        : `WAJIB BUKA ${pickupCardsStillRequired} KARTU LAGI`}
+                      WAJIB BUKA {pickupCardsStillRequired} KARTU LAGI
                     </span>
                   )}
                 </>
@@ -1128,12 +1126,7 @@ export function GameTable({
                     >
                       {/* kipas: rotasi di wrapper agar tak bentrok dengan drag */}
                       <div
-                        className={cn(
-                          "relative rounded-[0.55rem]",
-                          discardPickup?.target === c &&
-                            !discardPickup.targetMelded &&
-                            "ring-2 ring-[#f5c036] ring-offset-2 ring-offset-[#1a150a]"
-                        )}
+                        className="relative rounded-[0.55rem]"
                         style={{
                           transform: `rotate(${rot}deg)`,
                           transformOrigin: "50% 120%",
@@ -1173,7 +1166,8 @@ export function GameTable({
                     KAMU SUDAH DUDUK
                   </p>
                   <p className="mt-1 text-sm text-white/50">
-                    Kamu akan menerima kartu dan ikut bermain pada sesi berikutnya.
+                    Kamu akan menerima kartu dan ikut bermain pada sesi
+                    berikutnya.
                   </p>
                 </div>
               ) : canSitForNextRound ? (
@@ -1189,8 +1183,12 @@ export function GameTable({
                     disabled={join.isPending}
                     className="btn-gold mt-3 h-11 px-6 text-base disabled:opacity-60"
                   >
-                    {join.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {isAuthenticated ? "DUDUK UNTUK SESI BERIKUTNYA" : "MASUK UNTUK DUDUK"}
+                    {join.isPending && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    {isAuthenticated
+                      ? "DUDUK UNTUK SESI BERIKUTNYA"
+                      : "MASUK UNTUK DUDUK"}
                   </button>
                 </div>
               ) : (

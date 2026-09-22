@@ -39,30 +39,26 @@ function stateForTurn(hand: CardCode[], discard: CardCode[]): GameState {
 }
 
 describe("aturan ambil buangan", () => {
-  it("mewajibkan kartu target dibuka sebelum pemain boleh membuang", () => {
+  it("mengizinkan target buangan dibuang setelah membuka kombinasi lain", () => {
     const state = stateForTurn(
-      ["3S", "4S", "7H", "8H", "9H", "KD", "QC"],
-      ["5S"]
+      ["3S", "4S", "5S", "7H", "8H", "9H", "KD"],
+      ["2S"]
     );
 
     drawCard(state, 1, "discard", 0);
     expect(state.discardPickup).toMatchObject({
-      target: "5S",
+      target: "2S",
       depth: 0,
       cardsTaken: 1,
       openedCards: 0,
-      targetMelded: false,
     });
-
-    expect(() => discardCard(state, 1, "KD")).toThrow(/target.*5♠/i);
 
     meldCards(state, 1, ["3S", "4S", "5S"]);
     expect(state.discardPickup).toMatchObject({
       openedCards: 3,
-      targetMelded: true,
     });
 
-    discardCard(state, 1, "KD");
+    discardCard(state, 1, "2S");
     expect(state.players[0].hand).toHaveLength(4);
     expect(state.discardPickup).toBeNull();
   });

@@ -8,10 +8,11 @@
 //  • Tutupan (kombinasi) pertama tiap pemain WAJIB seri (urutan sejenis) & tanpa joker
 //  • As melingkar: K-A-2 dan A-2-3 sama-sama sah
 //  • Tidak ada layoff — kartu tidak bisa ditempel ke kombinasi yang sudah di meja
-//  • Ambil buangan: hanya 7 kartu teratas; kartu target + minimal 2 kartu tangan
-//    harus menjadi kombinasi jadi; semua kartu di atasnya ikut terambil
-//  • Setelah ambil buangan, kartu target wajib dibuka pada giliran yang sama.
-//    Sesudah membuang satu kartu, sisa tangan maksimal 7 kartu.
+//  • Ambil buangan: hanya 7 kartu teratas; kartu target harus dapat menjadi
+//    kombinasi dengan minimal 2 kartu tangan; semua kartu di atasnya ikut terambil
+//  • Setelah ambil buangan, pemain wajib membuka kartu secukupnya agar
+//    sesudah membuang satu kartu sisa tangan maksimal 7 kartu. Kartu target
+//    boleh tetap di tangan atau dibuang kembali.
 //  • Joker: tak boleh di tutupan pertama; membuang joker (terbuka) = sesi berakhir;
 //    joker di tangan saat sesi berakhir = −500; tutup tangan dengan joker = +500
 //  • Tutup tangan: kartu terakhir dibuang tertutup → sesi berakhir, +250
@@ -22,7 +23,21 @@
 
 export const SUITS = ["S", "H", "D", "C"] as const;
 export type Suit = (typeof SUITS)[number];
-export const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"] as const;
+export const RANKS = [
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "T",
+  "J",
+  "Q",
+  "K",
+  "A",
+] as const;
 /** Kode kartu: "AS"=As♠ … "TD"=10♦ … "X1"/"X2" = joker */
 export type CardCode = string;
 
@@ -34,8 +49,19 @@ export const DOUBLE_DECK_PLAYER_THRESHOLD = 4;
 export const DOUBLE_DECK_CARD_COUNT = 104;
 
 export const RANK_LABEL: Record<string, string> = {
-  "2": "2", "3": "3", "4": "4", "5": "5", "6": "6", "7": "7",
-  "8": "8", "9": "9", T: "10", J: "J", Q: "Q", K: "K", A: "A",
+  "2": "2",
+  "3": "3",
+  "4": "4",
+  "5": "5",
+  "6": "6",
+  "7": "7",
+  "8": "8",
+  "9": "9",
+  T: "10",
+  J: "J",
+  Q: "Q",
+  K: "K",
+  A: "A",
 };
 
 export const JOKERS: CardCode[] = ["X1", "X2"];
@@ -69,12 +95,14 @@ export function fullDeck(): CardCode[] {
 export function doubleDeck104(): CardCode[] {
   const standardDeck: CardCode[] = [];
   for (const s of SUITS) for (const r of RANKS) standardDeck.push(r + s);
-  return [...standardDeck, ...standardDeck.map((card) => `${card}~2`)];
+  return [...standardDeck, ...standardDeck.map(card => `${card}~2`)];
 }
 
 /** Pilih deck berdasarkan jumlah peserta sesi yang akan dimulai. */
 export function deckForPlayerCount(playerCount: number): CardCode[] {
-  return playerCount > DOUBLE_DECK_PLAYER_THRESHOLD ? doubleDeck104() : fullDeck();
+  return playerCount > DOUBLE_DECK_PLAYER_THRESHOLD
+    ? doubleDeck104()
+    : fullDeck();
 }
 
 export function shuffle<T>(arr: T[]): T[] {
@@ -86,7 +114,9 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-const SEQ_ORDER: Record<string, number> = Object.fromEntries(RANKS.map((r, i) => [r, i]));
+const SEQ_ORDER: Record<string, number> = Object.fromEntries(
+  RANKS.map((r, i) => [r, i])
+);
 const SUIT_ORDER: Record<string, number> = { S: 0, H: 1, D: 2, C: 3 };
 
 export function sortHand(hand: CardCode[]): CardCode[] {
@@ -125,30 +155,33 @@ const seqIdx = (r: string): number => SEQ.indexOf(r);
  *  • set : 3–4 kartu berangka sama, jenis berbeda; joker boleh mengisi
  *  • tutupan PERTAMA: wajib seri murni (tanpa joker, bukan set)
  */
-export function validateMeld(cards: CardCode[], meldedBefore = true): CardCode[] | null {
+export function validateMeld(
+  cards: CardCode[],
+  meldedBefore = true
+): CardCode[] | null {
   if (cards.length < 3) return null;
   const jokers = cards.filter(isJoker);
-  const nat = cards.filter((c) => !isJoker(c));
+  const nat = cards.filter(c => !isJoker(c));
   if (nat.length === 0) return null;
   if (jokers.length > 0 && !meldedBefore) return null;
 
   // Seri
-  if (nat.every((c) => c[1] === nat[0][1])) {
-    const idxs = nat.map((c) => seqIdx(c[0]));
+  if (nat.every(c => c[1] === nat[0][1])) {
+    const idxs = nat.map(c => seqIdx(c[0]));
     if (new Set(idxs).size !== idxs.length) return null; // duplikat
     // window melingkar sepanjang persis cards.length yang memuat semua kartu natural
     for (let start = 0; start < 13; start++) {
       const win = new Set<number>();
       for (let k = 0; k < cards.length; k++) win.add((start + k) % 13);
-      if (idxs.every((i) => win.has(i))) return cards;
+      if (idxs.every(i => win.has(i))) return cards;
     }
     return null;
   }
 
   // Set — tidak boleh sebagai tutupan pertama
   if (!meldedBefore) return null;
-  if (nat.every((c) => c[0] === nat[0][0])) {
-    const suits = new Set(nat.map((c) => c[1]));
+  if (nat.every(c => c[0] === nat[0][0])) {
+    const suits = new Set(nat.map(c => c[1]));
     if (suits.size !== nat.length) return null;
     if (cards.length > 4) return null;
     return cards;
@@ -158,7 +191,7 @@ export function validateMeld(cards: CardCode[], meldedBefore = true): CardCode[]
 
 /** Nilai poin sebuah meld; joker dinilai sebagai kartu yang diwakilinya. */
 export function meldPoints(meld: Meld): number {
-  const nat = meld.cards.filter((c) => !isJoker(c));
+  const nat = meld.cards.filter(c => !isJoker(c));
   const nj = meld.cards.length - nat.length;
   const sum = nat.reduce((s, c) => s + cardPoints(c), 0);
   if (nj === 0) return sum;
@@ -166,20 +199,30 @@ export function meldPoints(meld: Meld): number {
     return sum + nj * cardPoints(nat[0] ?? "5S");
   }
   // seri: cari window yang memuat natural, joker mengisi posisi kosong
-  const idxs = nat.map((c) => seqIdx(c[0]));
+  const idxs = nat.map(c => seqIdx(c[0]));
   for (let start = 0; start < 13; start++) {
     const win: number[] = [];
     for (let k = 0; k < meld.cards.length; k++) win.push((start + k) % 13);
-    if (idxs.every((i) => win.includes(i))) {
-      const empty = win.filter((i) => !idxs.includes(i));
-      return sum + empty.reduce((s, i) => s + cardPoints(SEQ[i] + meld.cards.find((c) => !isJoker(c))![1]), 0);
+    if (idxs.every(i => win.includes(i))) {
+      const empty = win.filter(i => !idxs.includes(i));
+      return (
+        sum +
+        empty.reduce(
+          (s, i) =>
+            s + cardPoints(SEQ[i] + meld.cards.find(c => !isJoker(c))![1]),
+          0
+        )
+      );
     }
   }
   return sum + nj * cardPoints(nat[0] ?? "5S");
 }
 
 /** Semua kombinasi legal yang bisa dibuka dari tangan (untuk bot & hint UI). */
-export function findMelds(hand: CardCode[], meldedBefore: boolean): CardCode[][] {
+export function findMelds(
+  hand: CardCode[],
+  meldedBefore: boolean
+): CardCode[][] {
   const jokers = hand.filter(isJoker);
   const out: CardCode[][] = [];
   const seen = new Set<string>();
@@ -204,14 +247,14 @@ export function findMelds(hand: CardCode[], meldedBefore: boolean): CardCode[][]
       for (let start = 0; start < 13; start++) {
         const win: number[] = [];
         for (let k = 0; k < len; k++) win.push((start + k) % 13);
-        const natIdx = win.filter((i) => cardAt.has(i));
+        const natIdx = win.filter(i => cardAt.has(i));
         if (natIdx.length < 3) continue;
         // kedua ujung harus kartu natural (jangan boros joker di pinggir)
         if (!cardAt.has(win[0]) || !cardAt.has(win[win.length - 1])) continue;
         const gaps = len - natIdx.length;
-        if (gaps === 0) push(natIdx.map((i) => cardAt.get(i)!));
+        if (gaps === 0) push(natIdx.map(i => cardAt.get(i)!));
         else if (meldedBefore && gaps <= jokers.length)
-          push([...natIdx.map((i) => cardAt.get(i)!), ...jokers.slice(0, gaps)]);
+          push([...natIdx.map(i => cardAt.get(i)!), ...jokers.slice(0, gaps)]);
       }
     }
   }
@@ -233,7 +276,9 @@ export function findMelds(hand: CardCode[], meldedBefore: boolean): CardCode[][]
   // urut greedy: poin terbesar dulu; seimbang → yang tanpa joker didahulukan
   const pts = (m: CardCode[]) => m.reduce((s, c) => s + cardPoints(c), 0);
   const nj = (m: CardCode[]) => m.filter(isJoker).length;
-  return out.sort((a, b) => pts(b) - pts(a) || nj(a) - nj(b) || b.length - a.length);
+  return out.sort(
+    (a, b) => pts(b) - pts(a) || nj(a) - nj(b) || b.length - a.length
+  );
 }
 
 function removeCardsFromHand(
@@ -256,10 +301,8 @@ function removeCardsFromHand(
  */
 export function planDiscardPickupMelds(
   hand: CardCode[],
-  target: CardCode,
   hasMelded: boolean,
   openedCards = 0,
-  targetMelded = false,
   requiredOpenedCards = 0
 ): CardCode[][] | null {
   const visited = new Set<string>();
@@ -267,14 +310,12 @@ export function planDiscardPickupMelds(
   const search = (
     remaining: CardCode[],
     canUseJokersAndSets: boolean,
-    opened: number,
-    hasTarget: boolean
+    opened: number
   ): CardCode[][] | null => {
-    if (hasTarget && opened >= requiredOpenedCards) return [];
+    if (opened >= requiredOpenedCards) return [];
 
     const key = [
       canUseJokersAndSets ? "1" : "0",
-      hasTarget ? "1" : "0",
       Math.min(opened, requiredOpenedCards),
       [...remaining].sort().join(","),
     ].join("|");
@@ -282,25 +323,18 @@ export function planDiscardPickupMelds(
     visited.add(key);
 
     const melds = findMelds(remaining, canUseJokersAndSets).sort(
-      (left, right) =>
-        Number(right.includes(target)) - Number(left.includes(target)) ||
-        right.length - left.length
+      (left, right) => right.length - left.length
     );
     for (const meld of melds) {
       const next = removeCardsFromHand(remaining, meld);
       if (!next) continue;
-      const rest = search(
-        next,
-        true,
-        opened + meld.length,
-        hasTarget || meld.includes(target)
-      );
+      const rest = search(next, true, opened + meld.length);
       if (rest) return [meld, ...rest];
     }
     return null;
   };
 
-  return search(hand, hasMelded, openedCards, targetMelded);
+  return search(hand, hasMelded, openedCards);
 }
 
 // ── State ─────────────────────────────────────────────────────────
@@ -330,7 +364,8 @@ export interface PlayerState {
   joinedAt: number;
 }
 
-export type SessionReason = "tutup" | "tutupJoker" | "jokerDiscarded" | "deckOut";
+export type SessionReason =
+  "tutup" | "tutupJoker" | "jokerDiscarded" | "deckOut";
 
 export interface SessionDelta {
   seat: number;
@@ -367,7 +402,7 @@ export interface RoundHistoryEntry {
  * kedalaman `d` mensyaratkan sedikitnya `d` kartu dibuka.
  */
 export interface DiscardPickupState {
-  /** Kartu yang dipilih dari tumpukan (bukan kartu-kartu di atasnya). */
+  /** Kartu yang dipilih dari tumpukan (untuk log/audit server). */
   target: CardCode;
   /** 0 = kartu paling atas, 6 = kartu ketujuh dari atas. */
   depth: number;
@@ -375,8 +410,6 @@ export interface DiscardPickupState {
   cardsTaken: number;
   /** Kartu yang sudah dipindahkan ke meld pada giliran ini. */
   openedCards: number;
-  /** Target harus benar-benar termasuk salah satu meld giliran ini. */
-  targetMelded: boolean;
 }
 
 export interface GameState {
@@ -448,7 +481,9 @@ export function createRoomState(opts: {
     opts.maxPlayers < MIN_ROOM_PLAYERS ||
     opts.maxPlayers > MAX_ROOM_PLAYERS
   ) {
-    throw new Error(`Room harus memiliki ${MIN_ROOM_PLAYERS}–${MAX_ROOM_PLAYERS} pemain`);
+    throw new Error(
+      `Room harus memiliki ${MIN_ROOM_PLAYERS}–${MAX_ROOM_PLAYERS} pemain`
+    );
   }
   const state: GameState = {
     matchType: opts.matchType ?? "private",
@@ -480,13 +515,16 @@ export function createRoomState(opts: {
       name: opts.hostName,
       avatar: opts.hostAvatar,
       isBot: false,
-    }),
+    })
   );
   return state;
 }
 
-export function getPlayerByUser(state: GameState, userId: number): PlayerState | undefined {
-  return state.players.find((p) => !isVacantSeat(p) && p.userId === userId);
+export function getPlayerByUser(
+  state: GameState,
+  userId: number
+): PlayerState | undefined {
+  return state.players.find(p => !isVacantSeat(p) && p.userId === userId);
 }
 
 /** State lama yang belum memiliki field baru dianggap sebagai kursi terisi. */
@@ -496,13 +534,13 @@ export function isVacantSeat(player: Pick<PlayerState, "isVacant">): boolean {
 
 /** Peserta yang mendapat kartu dan boleh mengambil giliran pada sesi aktif. */
 export function isRoundParticipant(
-  player: Pick<PlayerState, "isVacant" | "inRound">,
+  player: Pick<PlayerState, "isVacant" | "inRound">
 ): boolean {
   return !isVacantSeat(player) && player.inRound !== false;
 }
 
 export function occupiedPlayers(state: GameState): PlayerState[] {
-  return state.players.filter((player) => !isVacantSeat(player));
+  return state.players.filter(player => !isVacantSeat(player));
 }
 
 function roundParticipants(state: GameState): PlayerState[] {
@@ -512,13 +550,16 @@ function roundParticipants(state: GameState): PlayerState[] {
 }
 
 function playerAtSeat(state: GameState, seat: number): PlayerState | undefined {
-  return state.players.find((player) => player.seat === seat);
+  return state.players.find(player => player.seat === seat);
 }
 
-function nextRoundParticipant(state: GameState, seat: number): PlayerState | undefined {
+function nextRoundParticipant(
+  state: GameState,
+  seat: number
+): PlayerState | undefined {
   const players = roundParticipants(state);
   if (players.length === 0) return undefined;
-  return players.find((player) => player.seat > seat) ?? players[0];
+  return players.find(player => player.seat > seat) ?? players[0];
 }
 
 /** Kursi pertama yang belum terisi, termasuk kursi yang belum pernah dibuat. */
@@ -536,7 +577,7 @@ export function firstOpenSeat(state: GameState): number | null {
  */
 export function addPlayerToRoom(
   state: GameState,
-  input: Omit<Parameters<typeof makePlayer>[0], "seat">,
+  input: Omit<Parameters<typeof makePlayer>[0], "seat">
 ): { player: PlayerState; joinsNextRound: boolean } {
   if (occupiedPlayers(state).length >= state.maxPlayers) {
     throw new Error("Room penuh");
@@ -544,7 +585,8 @@ export function addPlayerToRoom(
   const seat = firstOpenSeat(state);
   if (seat === null) throw new Error("Kursi room tidak tersedia");
 
-  const joinsNextRound = state.status === "playing" || state.status === "roundEnd";
+  const joinsNextRound =
+    state.status === "playing" || state.status === "roundEnd";
   const next = makePlayer({ ...input, seat });
   next.inRound = !joinsNextRound;
 
@@ -589,25 +631,25 @@ function resetToWaiting(state: GameState) {
  */
 export function leavePlayerFromRoom(
   state: GameState,
-  userId: number,
+  userId: number
 ): { didLeave: boolean; shouldDestroy: boolean } {
   const me = getPlayerByUser(state, userId);
   if (!me) {
     return {
       didLeave: false,
       shouldDestroy: !occupiedPlayers(state).some(
-        (player) => !player.isBot && player.userId !== null,
+        player => !player.isBot && player.userId !== null
       ),
     };
   }
 
   if (state.status === "waiting") {
     state.players = state.players
-      .filter((player) => player.seat !== me.seat && !isVacantSeat(player))
+      .filter(player => player.seat !== me.seat && !isVacantSeat(player))
       .map((player, seat) => ({ ...player, seat }));
     if (state.hostSeat === me.seat) {
       const nextHuman = state.players.find(
-        (player) => !player.isBot && player.userId !== null,
+        player => !player.isBot && player.userId !== null
       );
       state.hostSeat = nextHuman ? nextHuman.seat : 0;
     }
@@ -622,11 +664,12 @@ export function leavePlayerFromRoom(
       const returnedCards = [
         ...me.hand,
         ...state.melds
-          .filter((meld) => meld.ownerSeat === me.seat)
-          .flatMap((meld) => meld.cards),
+          .filter(meld => meld.ownerSeat === me.seat)
+          .flatMap(meld => meld.cards),
       ];
-      state.melds = state.melds.filter((meld) => meld.ownerSeat !== me.seat);
-      if (returnedCards.length > 0) state.stock = shuffle([...state.stock, ...returnedCards]);
+      state.melds = state.melds.filter(meld => meld.ownerSeat !== me.seat);
+      if (returnedCards.length > 0)
+        state.stock = shuffle([...state.stock, ...returnedCards]);
     }
 
     Object.assign(me, {
@@ -646,7 +689,7 @@ export function leavePlayerFromRoom(
 
     if (state.hostSeat === me.seat) {
       const nextHuman = occupiedPlayers(state).find(
-        (player) => !player.isBot && player.userId !== null,
+        player => !player.isBot && player.userId !== null
       );
       if (nextHuman) state.hostSeat = nextHuman.seat;
     }
@@ -677,7 +720,7 @@ export function leavePlayerFromRoom(
     const host = playerAtSeat(state, state.hostSeat);
     if (host?.isBot) {
       const nextHuman = state.players.find(
-        (player) => !player.isBot && player.userId !== null,
+        player => !player.isBot && player.userId !== null
       );
       if (nextHuman) state.hostSeat = nextHuman.seat;
     }
@@ -687,7 +730,7 @@ export function leavePlayerFromRoom(
   return {
     didLeave: true,
     shouldDestroy: !occupiedPlayers(state).some(
-      (player) => !player.isBot && player.userId !== null,
+      player => !player.isBot && player.userId !== null
     ),
   };
 }
@@ -729,7 +772,10 @@ export function startRound(state: GameState) {
   state.turnStartedAt = Date.now();
   state.botActionAt = 0;
   state.status = "playing";
-  pushLog(state, `— Sesi ${state.round} dimulai · ${n} pemain × ${CARDS_PER_PLAYER} kartu —`);
+  pushLog(
+    state,
+    `— Sesi ${state.round} dimulai · ${n} pemain × ${CARDS_PER_PLAYER} kartu —`
+  );
 }
 
 function currentPlayer(state: GameState): PlayerState {
@@ -750,7 +796,7 @@ export function drawCard(
   state: GameState,
   userId: number,
   from: "stock" | "discard",
-  depth = 0,
+  depth = 0
 ): CardCode[] {
   if (state.status !== "playing" || state.phase !== "draw")
     throw new Error("Bukan fase ambil kartu");
@@ -759,13 +805,19 @@ export function drawCard(
   return drawCardInternal(state, from, depth);
 }
 
-export function meldCards(state: GameState, userId: number, cards: CardCode[]): Meld {
+export function meldCards(
+  state: GameState,
+  userId: number,
+  cards: CardCode[]
+): Meld {
   if (state.status !== "playing" || state.phase !== "play")
     throw new Error("Bukan fase bermain");
   const p = currentPlayer(state);
   if (p.userId !== userId) throw new Error("Bukan giliranmu");
   if (!p.hasMelded && cards.some(isJoker))
-    throw new Error("Tutupan pertama harus SERI (urutan satu jenis) tanpa joker");
+    throw new Error(
+      "Tutupan pertama harus SERI (urutan satu jenis) tanpa joker"
+    );
   return meldCardsInternal(state, cards);
 }
 
@@ -773,7 +825,7 @@ export function discardCard(
   state: GameState,
   userId: number,
   card: CardCode,
-  faceDown = false,
+  faceDown = false
 ) {
   if (state.status !== "playing" || state.phase !== "play")
     throw new Error("Bukan fase bermain");
@@ -796,16 +848,28 @@ function advanceTurn(state: GameState) {
   if (state.stock.length === 0) endSessionDeckOut(state);
 }
 
-function endSession(state: GameState, reason: SessionReason, closerSeat: number | null) {
+function endSession(
+  state: GameState,
+  reason: SessionReason,
+  closerSeat: number | null
+) {
   const participants = roundParticipants(state);
-  const prevScores = new Map(participants.map((player) => [player.seat, player.score]));
-  const deltas: SessionDelta[] = participants.map((p) => {
+  const prevScores = new Map(
+    participants.map(player => [player.seat, player.score])
+  );
+  const deltas: SessionDelta[] = participants.map(p => {
     const meldPlus = state.melds
-      .filter((m) => m.ownerSeat === p.seat)
+      .filter(m => m.ownerSeat === p.seat)
       .reduce((s, m) => s + m.points, 0);
     const handMinus = handPoints(p.hand);
     const bonus =
-      closerSeat === p.seat ? (reason === "tutupJoker" ? 500 : reason === "tutup" ? 250 : 0) : 0;
+      closerSeat === p.seat
+        ? reason === "tutupJoker"
+          ? 500
+          : reason === "tutup"
+            ? 250
+            : 0
+        : 0;
     const delta = meldPlus - handMinus + bonus;
     p.lastRoundPoints = delta;
     p.score += delta;
@@ -826,22 +890,25 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
   for (const y of participants) {
     const prevY = prevScores.get(y.seat) ?? y.score;
     const salip = participants.some(
-      (x) =>
+      x =>
         x.seat !== y.seat &&
         (prevScores.get(x.seat) ?? x.score) <= prevY &&
-        x.score > y.score,
+        x.score > y.score
     );
     if (salip && y.score !== 0) {
       y.score = 0;
-      const d = deltas.find((dd) => dd.seat === y.seat)!;
+      const d = deltas.find(dd => dd.seat === y.seat)!;
       d.tersalip = true;
       d.newScore = 0;
     }
   }
-  if (deltas.some((d) => d.tersalip))
+  if (deltas.some(d => d.tersalip))
     pushLog(
       state,
-      `Tersalip! Skor ${deltas.filter((d) => d.tersalip).map((d) => d.name).join(", ")} hangus ke 0.`,
+      `Tersalip! Skor ${deltas
+        .filter(d => d.tersalip)
+        .map(d => d.name)
+        .join(", ")} hangus ke 0.`
     );
 
   // target tercapai?
@@ -874,7 +941,7 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
     label: reasonLabel,
     reason,
     winnerSeat: closerSeat,
-    deltas: deltas.map((d) => ({ seat: d.seat, delta: d.delta })),
+    deltas: deltas.map(d => ({ seat: d.seat, delta: d.delta })),
   });
 
   if (targetReachedBy !== null) {
@@ -884,7 +951,7 @@ function endSession(state: GameState, reason: SessionReason, closerSeat: number 
       state,
       `${playerAtSeat(state, targetReachedBy)?.name ?? "Pemain"} mencapai ${
         playerAtSeat(state, targetReachedBy)?.score ?? 0
-      } poin — MENANG!`,
+      } poin — MENANG!`
     );
   } else {
     state.status = "roundEnd";
@@ -940,14 +1007,17 @@ export interface ClientState {
   you: { seat: number } | null;
 }
 
-export function sanitizeState(state: GameState, userId: number | null): ClientState {
+export function sanitizeState(
+  state: GameState,
+  userId: number | null
+): ClientState {
   const reveal = state.status === "roundEnd" || state.status === "finished";
   const me = userId != null ? getPlayerByUser(state, userId) : undefined;
   const discardPickup =
     me?.seat === state.turnSeat && state.discardPickup
       ? { ...state.discardPickup }
       : null;
-  const players: ClientPlayer[] = state.players.map((p) => {
+  const players: ClientPlayer[] = state.players.map(p => {
     const showHand = !isVacantSeat(p) && (reveal || p.seat === me?.seat);
     return {
       seat: p.seat,
@@ -964,7 +1034,7 @@ export function sanitizeState(state: GameState, userId: number | null): ClientSt
       lastRoundPoints: p.lastRoundPoints,
       hasMelded: p.hasMelded,
       meldPlus: state.melds
-        .filter((m) => m.ownerSeat === p.seat)
+        .filter(m => m.ownerSeat === p.seat)
         .reduce((s, m) => s + m.points, 0),
       handMinus: showHand ? handPoints(p.hand) : undefined,
     };
@@ -979,7 +1049,7 @@ export function sanitizeState(state: GameState, userId: number | null): ClientSt
     stockCount: state.stock.length,
     discard: [...state.discard],
     closedCard: reveal ? state.closedCard : state.closedCard ? "BACK" : null,
-    melds: state.melds.map((m) => ({ ...m })),
+    melds: state.melds.map(m => ({ ...m })),
     players,
     turnSeat: state.turnSeat,
     turnStartedAt: state.turnStartedAt,
@@ -999,7 +1069,11 @@ export const TURN_TIMEOUT_MS = 75_000;
 
 /** Kegunaan kartu terhadap tangan: pasangan set / kedekatan seri (As melingkar).
  *  Sebelum buka, kedekatan seri lebih bernilai (tutupan pertama wajib seri). */
-function cardUsefulness(card: CardCode, hand: CardCode[], opened: boolean): number {
+function cardUsefulness(
+  card: CardCode,
+  hand: CardCode[],
+  opened: boolean
+): number {
   if (isJoker(card)) return 100;
   let u = 0;
   for (const o of hand) {
@@ -1021,27 +1095,19 @@ function bestDiscardTake(state: GameState, p: PlayerState): number {
   let bestProfit = 0;
   for (let depth = 0; depth < Math.min(7, state.discard.length); depth++) {
     const target = state.discard[state.discard.length - 1 - depth];
-    const combos = findMelds([...p.hand, target], p.hasMelded).filter((m) =>
-      m.includes(target),
+    const combos = findMelds([...p.hand, target], p.hasMelded).filter(m =>
+      m.includes(target)
     );
     if (combos.length === 0) continue;
     const taken = state.discard.slice(state.discard.length - 1 - depth);
-    if (
-      !planDiscardPickupMelds(
-        [...p.hand, ...taken],
-        target,
-        p.hasMelded,
-        0,
-        false,
-        depth
-      )
-    ) {
+    if (!planDiscardPickupMelds([...p.hand, ...taken], p.hasMelded, 0, depth)) {
       continue;
     }
     // untung = poin kombinasi jadi − beban kartu acak yang ikut terambil
     const gain = combos[0].reduce((s, c) => s + cardPoints(c), 0);
     const extra = state.discard.slice(state.discard.length - depth);
-    const burden = extra.reduce((s, c) => s + (isJoker(c) ? 0 : cardPoints(c)), 0) / 2;
+    const burden =
+      extra.reduce((s, c) => s + (isJoker(c) ? 0 : cardPoints(c)), 0) / 2;
     const profit = gain - burden - depth * 2;
     if (profit > bestProfit) {
       bestProfit = profit;
@@ -1067,16 +1133,11 @@ export function botNextAction(state: GameState): BotAction {
   }
 
   const pickup = state.discardPickup;
-  if (
-    pickup &&
-    (!pickup.targetMelded || pickup.openedCards < pickup.depth)
-  ) {
+  if (pickup && pickup.openedCards < pickup.depth) {
     const plan = planDiscardPickupMelds(
       p.hand,
-      pickup.target,
       p.hasMelded,
       pickup.openedCards,
-      pickup.targetMelded,
       pickup.depth
     );
     if (plan?.[0]) return { type: "meld", cards: plan[0] };
@@ -1091,7 +1152,7 @@ export function botNextAction(state: GameState): BotAction {
     return { type: "discard", card: p.hand[0], faceDown: true };
 
   // buang kartu paling tidak berguna & bernilai besar; jangan buang joker
-  const candidates = p.hand.filter((c) => !isJoker(c));
+  const candidates = p.hand.filter(c => !isJoker(c));
   if (candidates.length === 0) {
     // hanya pegang joker → tutup dengan joker
     return { type: "discard", card: p.hand[0], faceDown: true };
@@ -1110,7 +1171,12 @@ export function botNextAction(state: GameState): BotAction {
 
 function botPlayStep(state: GameState): boolean {
   const p = currentPlayer(state);
-  const before = JSON.stringify([state.turnSeat, state.phase, state.status, p.hand.length]);
+  const before = JSON.stringify([
+    state.turnSeat,
+    state.phase,
+    state.status,
+    p.hand.length,
+  ]);
   const action = botNextAction(state);
   try {
     switch (action.type) {
@@ -1130,16 +1196,25 @@ function botPlayStep(state: GameState): boolean {
   } catch {
     // fallback paksa agar giliran tak pernah macet
     try {
-      if (state.status === "playing" && state.phase === "draw") drawCardInternal(state, "stock", 0);
+      if (state.status === "playing" && state.phase === "draw")
+        drawCardInternal(state, "stock", 0);
       if (state.status === "playing" && state.phase === "play") {
-        const c = p.hand.filter((x) => !isJoker(x)).sort((a, b) => cardPoints(b) - cardPoints(a))[0] ?? p.hand[0];
+        const c =
+          p.hand
+            .filter(x => !isJoker(x))
+            .sort((a, b) => cardPoints(b) - cardPoints(a))[0] ?? p.hand[0];
         discardCardInternal(state, c, p.hand.length === 1);
       }
     } catch {
       /* sesi sudah berakhir */
     }
   }
-  const after = JSON.stringify([state.turnSeat, state.phase, state.status, p.hand.length]);
+  const after = JSON.stringify([
+    state.turnSeat,
+    state.phase,
+    state.status,
+    p.hand.length,
+  ]);
   return before !== after;
 }
 
@@ -1147,7 +1222,7 @@ function botPlayStep(state: GameState): boolean {
 function drawCardInternal(
   state: GameState,
   from: "stock" | "discard",
-  depth: number,
+  depth: number
 ): CardCode[] {
   const p = currentPlayer(state);
   if (state.status !== "playing" || state.phase !== "draw")
@@ -1164,12 +1239,13 @@ function drawCardInternal(
     return [card];
   }
   // dari tumpukan buangan: depth 0..6 (7 kartu teratas)
-  if (depth < 0 || depth > 6) throw new Error("Hanya boleh mengambil 7 kartu teratas");
+  if (depth < 0 || depth > 6)
+    throw new Error("Hanya boleh mengambil 7 kartu teratas");
   if (depth >= state.discard.length)
     throw new Error("Tumpukan buangan tidak sedalam itu");
   const target = state.discard[state.discard.length - 1 - depth];
-  const combos = findMelds([...p.hand, target], p.hasMelded).filter((m) =>
-    m.includes(target),
+  const combos = findMelds([...p.hand, target], p.hasMelded).filter(m =>
+    m.includes(target)
   );
   if (combos.length === 0)
     throw new Error("Kartu itu belum menjadi kombinasi jadi dengan kartumu");
@@ -1177,15 +1253,13 @@ function drawCardInternal(
   const taken = state.discard.slice(state.discard.length - 1 - depth);
   const plan = planDiscardPickupMelds(
     [...p.hand, ...taken],
-    target,
     p.hasMelded,
     0,
-    false,
     depth
   );
   if (!plan) {
     throw new Error(
-      `Ambilan ini tidak bisa diselesaikan: buka kartu target dan minimal ${depth} kartu sebelum membuang.`
+      `Ambilan ini tidak bisa diselesaikan: buka minimal ${depth} kartu sebelum membuang.`
     );
   }
 
@@ -1196,23 +1270,25 @@ function drawCardInternal(
     depth,
     cardsTaken: taken.length,
     openedCards: 0,
-    targetMelded: false,
   };
   state.phase = "play";
   pushLog(
     state,
-    `${p.name} mengambil ${taken.length > 1 ? `${taken.length} kartu` : cardLabel(target)} dari buangan`,
+    `${p.name} mengambil ${taken.length > 1 ? `${taken.length} kartu` : cardLabel(target)} dari buangan`
   );
   return taken;
 }
 
 function meldCardsInternal(state: GameState, cards: CardCode[]): Meld {
   const p = currentPlayer(state);
-  for (const c of cards) if (!p.hand.includes(c)) throw new Error("kartu tak ada");
+  for (const c of cards)
+    if (!p.hand.includes(c)) throw new Error("kartu tak ada");
   const resolved = validateMeld(cards, p.hasMelded);
   if (!resolved) throw new Error("kombinasi tidak valid");
-  const nats = cards.filter((c) => !isJoker(c));
-  const kind: "seri" | "set" = nats.every((c) => c[0] === nats[0][0]) ? "set" : "seri";
+  const nats = cards.filter(c => !isJoker(c));
+  const kind: "seri" | "set" = nats.every(c => c[0] === nats[0][0])
+    ? "set"
+    : "seri";
   for (const c of cards) p.hand.splice(p.hand.indexOf(c), 1);
   const meld: Meld = {
     id: `m${state.round}-${p.seat}-${state.melds.length}`,
@@ -1226,26 +1302,25 @@ function meldCardsInternal(state: GameState, cards: CardCode[]): Meld {
   p.hasMelded = true;
   if (state.discardPickup) {
     state.discardPickup.openedCards += cards.length;
-    if (cards.includes(state.discardPickup.target)) {
-      state.discardPickup.targetMelded = true;
-    }
   }
-  pushLog(state, `${p.name} buka ${kind}: ${cards.map(cardLabel).join(" ")} (+${meld.points})`);
+  pushLog(
+    state,
+    `${p.name} buka ${kind}: ${cards.map(cardLabel).join(" ")} (+${meld.points})`
+  );
   if (p.hand.length === 0) endSession(state, "tutup", p.seat);
   return meld;
 }
 
-function discardCardInternal(state: GameState, card: CardCode, faceDown: boolean) {
+function discardCardInternal(
+  state: GameState,
+  card: CardCode,
+  faceDown: boolean
+) {
   const p = currentPlayer(state);
   const i = p.hand.indexOf(card);
   if (i < 0) throw new Error("kartu tak ada");
   const pickup = state.discardPickup;
   if (pickup) {
-    if (!pickup.targetMelded) {
-      throw new Error(
-        `Kartu target ${cardLabel(pickup.target)} dari buangan wajib dibuka terlebih dahulu.`
-      );
-    }
     if (pickup.openedCards < pickup.depth) {
       throw new Error(
         `Ambil ${pickup.cardsTaken} kartu dari buangan: buka minimal ${pickup.depth} kartu sebelum membuang.`
@@ -1262,7 +1337,10 @@ function discardCardInternal(state: GameState, card: CardCode, faceDown: boolean
     p.hand.splice(i, 1);
     state.closedCard = card;
     const withJoker = isJoker(card);
-    pushLog(state, `${p.name} TUTUP TANGAN${withJoker ? " dengan JOKER" : ""}!`);
+    pushLog(
+      state,
+      `${p.name} TUTUP TANGAN${withJoker ? " dengan JOKER" : ""}!`
+    );
     endSession(state, withJoker ? "tutupJoker" : "tutup", p.seat);
     return;
   }
@@ -1318,7 +1396,10 @@ export function tickGame(state: GameState): boolean {
       if (!moved) break;
     } else {
       if (now - state.turnStartedAt >= TURN_TIMEOUT_MS) {
-        pushLog(state, `${p.name} kehabisan waktu — giliran dimainkan otomatis.`);
+        pushLog(
+          state,
+          `${p.name} kehabisan waktu — giliran dimainkan otomatis.`
+        );
         botPlayStep(state);
         state.turnStartedAt = Date.now();
         acted = true;
@@ -1330,7 +1411,12 @@ export function tickGame(state: GameState): boolean {
 }
 
 export const BOT_NAMES = [
-  "Bot Kartini", "Bot Gajah", "Bot Kakek", "Bot Nyi Roro", "Bot Paijo", "Bot Slamet",
+  "Bot Kartini",
+  "Bot Gajah",
+  "Bot Kakek",
+  "Bot Nyi Roro",
+  "Bot Paijo",
+  "Bot Slamet",
   "Bot Srikandi",
 ];
 export const TARGET_SCORES = [250, 500, 1000];
@@ -1338,6 +1424,7 @@ export const TARGET_SCORES = [250, 500, 1000];
 export function generateRoomCode(): string {
   const abc = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let code = "";
-  for (let i = 0; i < 6; i++) code += abc[Math.floor(Math.random() * abc.length)];
+  for (let i = 0; i < 6; i++)
+    code += abc[Math.floor(Math.random() * abc.length)];
   return code;
 }
