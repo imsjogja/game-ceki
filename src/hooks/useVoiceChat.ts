@@ -837,7 +837,11 @@ export function useVoiceChat(opts: UseVoiceChatOptions) {
     operationRef.current = operation;
     startingRef.current = true;
     setStarting(true);
-    setConnectionState("connecting");
+    // Mode dengar mungkin sudah tersambung saat pemain baru menyalakan mic.
+    // Jangan timpa status `connected` dengan `connecting`: tidak ada socket
+    // baru pada jalur ini, sehingga indikator loading sebelumnya berputar
+    // permanen walaupun izin mic dan signaling sudah berhasil.
+    if (!activeRef.current) setConnectionState("connecting");
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
