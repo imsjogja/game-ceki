@@ -517,18 +517,31 @@ export function GameTable({
     );
   }, [myPlayer?.hand, manualOrder, sortMode]);
 
+  const handCount = myPlayer?.handCount ?? 0;
   const validSelection =
     selected.length >= 3 &&
+    selected.length < handCount &&
     validateMeld(selected, myPlayer?.hasMelded ?? false) !== null;
-
-  const handCount = myPlayer?.handCount ?? 0;
   const oneSelected = selected.length === 1;
   const selectedJoker = oneSelected && isJoker(selected[0]);
   const canTutup = myTurn && phase === "play" && oneSelected && handCount === 1;
   const canDiscard = myTurn && phase === "play" && oneSelected && handCount > 1;
   const discardPickup = state.discardPickup;
+  const discardPickupCanBeResolved =
+    !discardPickup ||
+    Boolean(
+      planDiscardPickupMelds(
+        myPlayer?.hand ?? [],
+        myPlayer?.hasMelded ?? false,
+        discardPickup.openedCards,
+        discardPickup.depth,
+        1
+      )
+    );
   const discardPickupResolved =
-    !discardPickup || discardPickup.openedCards >= discardPickup.depth;
+    !discardPickup ||
+    discardPickup.openedCards >= discardPickup.depth ||
+    !discardPickupCanBeResolved;
   const pickupCardsStillRequired = discardPickup
     ? Math.max(0, discardPickup.depth - discardPickup.openedCards)
     : 0;
@@ -550,7 +563,8 @@ export function GameTable({
         [...myPlayer.hand, ...taken],
         myPlayer.hasMelded,
         0,
-        depth
+        depth,
+        1
       )
     );
   };
@@ -1054,9 +1068,19 @@ export function GameTable({
                       Tutupan pertama harus seri tanpa joker
                     </span>
                   )}
+                  {selected.length === handCount && handCount > 0 && (
+                    <span className="text-[11px] text-white/40">
+                      Sisakan 1 kartu untuk tutup tangan
+                    </span>
+                  )}
                   {discardPickup && !discardPickupResolved && (
                     <span className="rounded-full bg-[#c10328]/20 px-3 py-1.5 text-[11px] font-semibold text-[#ffd2d9] ring-1 ring-[#c10328]/50">
                       WAJIB BUKA {pickupCardsStillRequired} KARTU LAGI
+                    </span>
+                  )}
+                  {discardPickup && !discardPickupCanBeResolved && (
+                    <span className="rounded-full bg-[#f5c036]/15 px-3 py-1.5 text-[11px] font-semibold text-[#f5c036] ring-1 ring-[#f5c036]/40">
+                      Tidak ada kombinasi lanjutan; buang 1 kartu untuk lanjut
                     </span>
                   )}
                 </>

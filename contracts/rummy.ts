@@ -6,7 +6,7 @@
 //  • Nilai: 2–10 = 5 poin, J/Q/K = 10, As = 15, Joker = nilai kartu yang diwakili
 //  • Kartu jadi (di meja) = poin PLUS; sisa kartu tangan = poin MINUS
 //  • Tutupan (kombinasi) pertama tiap pemain WAJIB seri (urutan sejenis) & tanpa joker
-//  • As melingkar: K-A-2 dan A-2-3 sama-sama sah
+//  • Seri tidak melingkar: hanya 2 sampai K; As hanya boleh masuk set
 //  • Tidak ada layoff — kartu tidak bisa ditempel ke kombinasi yang sudah di meja
 //  • Ambil buangan: hanya 7 kartu teratas; kartu target harus dapat menjadi
 //    kombinasi dengan minimal 2 kartu tangan; semua kartu di atasnya ikut terambil
@@ -115,7 +115,10 @@ export function shuffle<T>(arr: T[]): T[] {
 }
 
 const SEQ_ORDER: Record<string, number> = Object.fromEntries(
-  RANKS.map((r, i) => [r, i])
+  ["A", ...RANKS.filter(rank => rank !== "A")].map((rank, index) => [
+    rank,
+    index,
+  ])
 );
 const SUIT_ORDER: Record<string, number> = { S: 0, H: 1, D: 2, C: 3 };
 
@@ -146,12 +149,13 @@ export interface Meld {
   points: number;
 }
 
-const SEQ: string[] = [...RANKS]; // 2..A; As melingkar (sesudah A kembali ke 2)
+/** As tidak dapat menjadi bagian seri; urutan legal selalu 2 hingga K. */
+const SEQ: string[] = RANKS.filter(rank => rank !== "A");
 const seqIdx = (r: string): number => SEQ.indexOf(r);
 
 /**
  * Validasi kombinasi. `meldedBefore` = pemain sudah pernah buka.
- *  • seri: 3+ kartu sejenis berurutan (As melingkar), joker boleh menambal
+ *  • seri: 3+ kartu sejenis berurutan dari 2 sampai K, joker boleh menambal
  *  • set : 3–4 kartu berangka sama, jenis berbeda; joker boleh mengisi
  *  • tutupan PERTAMA: wajib seri murni (tanpa joker, bukan set)
  */
@@ -166,13 +170,13 @@ export function validateMeld(
   if (jokers.length > 0 && !meldedBefore) return null;
 
   // Seri
-  if (nat.every(c => c[1] === nat[0][1])) {
+  if (nat.every(c => c[1] === nat[0][1]) && nat.every(c => c[0] !== "A")) {
     const idxs = nat.map(c => seqIdx(c[0]));
     if (new Set(idxs).size !== idxs.length) return null; // duplikat
-    // window melingkar sepanjang persis cards.length yang memuat semua kartu natural
-    for (let start = 0; start < 13; start++) {
+    // Window linear: urutan tidak boleh membungkus dari K kembali ke 2.
+    for (let start = 0; start <= SEQ.length - cards.length; start++) {
       const win = new Set<number>();
-      for (let k = 0; k < cards.length; k++) win.add((start + k) % 13);
+      for (let k = 0; k < cards.length; k++) win.add(start + k);
       if (idxs.every(i => win.has(i))) return cards;
     }
     return null;
@@ -198,11 +202,11 @@ export function meldPoints(meld: Meld): number {
   if (meld.kind === "set") {
     return sum + nj * cardPoints(nat[0] ?? "5S");
   }
-  // seri: cari window yang memuat natural, joker mengisi posisi kosong
+  // Seri: cari window linear yang memuat kartu natural, joker mengisi celah.
   const idxs = nat.map(c => seqIdx(c[0]));
-  for (let start = 0; start < 13; start++) {
+  for (let start = 0; start <= SEQ.length - meld.cards.length; start++) {
     const win: number[] = [];
-    for (let k = 0; k < meld.cards.length; k++) win.push((start + k) % 13);
+    for (let k = 0; k < meld.cards.length; k++) win.push(start + k);
     if (idxs.every(i => win.includes(i))) {
       const empty = win.filter(i => !idxs.includes(i));
       return (
@@ -235,18 +239,22 @@ export function findMelds(
     out.push(m);
   };
 
-  // Seri: untuk tiap jenis, coba semua window melingkar berisi ≥3 natural
+  // Seri: untuk tiap jenis, coba semua window linear berisi >=3 kartu natural.
   for (const s of SUITS) {
     const cardAt = new Map<number, CardCode>();
     for (const c of hand) {
-      if (isJoker(c) || c[1] !== s) continue;
+      if (isJoker(c) || c[1] !== s || c[0] === "A") continue;
       cardAt.set(seqIdx(c[0]), c);
     }
     if (cardAt.size === 0) continue;
-    for (let len = 3; len <= Math.min(13, cardAt.size + jokers.length); len++) {
-      for (let start = 0; start < 13; start++) {
+    for (
+      let len = 3;
+      len <= Math.min(SEQ.length, cardAt.size + jokers.length);
+      len++
+    ) {
+      for (let start = 0; start <= SEQ.length - len; start++) {
         const win: number[] = [];
-        for (let k = 0; k < len; k++) win.push((start + k) % 13);
+        for (let k = 0; k < len; k++) win.push(start + k);
         const natIdx = win.filter(i => cardAt.has(i));
         if (natIdx.length < 3) continue;
         // kedua ujung harus kartu natural (jangan boros joker di pinggir)
@@ -303,7 +311,8 @@ export function planDiscardPickupMelds(
   hand: CardCode[],
   hasMelded: boolean,
   openedCards = 0,
-  requiredOpenedCards = 0
+  requiredOpenedCards = 0,
+  minCardsRemaining = 0
 ): CardCode[][] | null {
   const visited = new Set<string>();
 
@@ -312,7 +321,8 @@ export function planDiscardPickupMelds(
     canUseJokersAndSets: boolean,
     opened: number
   ): CardCode[][] | null => {
-    if (opened >= requiredOpenedCards) return [];
+    if (opened >= requiredOpenedCards)
+      return remaining.length >= minCardsRemaining ? [] : null;
 
     const key = [
       canUseJokersAndSets ? "1" : "0",
@@ -1067,7 +1077,7 @@ export function sanitizeState(
 export const BOT_DELAY_MS = 1100;
 export const TURN_TIMEOUT_MS = 75_000;
 
-/** Kegunaan kartu terhadap tangan: pasangan set / kedekatan seri (As melingkar).
+/** Kegunaan kartu terhadap tangan: pasangan set / kedekatan seri linear.
  *  Sebelum buka, kedekatan seri lebih bernilai (tutupan pertama wajib seri). */
 function cardUsefulness(
   card: CardCode,
@@ -1079,11 +1089,10 @@ function cardUsefulness(
   for (const o of hand) {
     if (o === card || isJoker(o)) continue;
     if (o[0] === card[0]) u += opened ? 3 : 1;
-    else if (o[1] === card[1]) {
+    else if (o[1] === card[1] && o[0] !== "A" && card[0] !== "A") {
       const d = Math.abs(seqIdx(o[0]) - seqIdx(card[0]));
-      const gap = Math.min(d, 13 - d);
-      if (gap === 1) u += opened ? 3 : 4;
-      else if (gap === 2) u += opened ? 1 : 2;
+      if (d === 1) u += opened ? 3 : 4;
+      else if (d === 2) u += opened ? 1 : 2;
     }
   }
   return u;
@@ -1100,7 +1109,9 @@ function bestDiscardTake(state: GameState, p: PlayerState): number {
     );
     if (combos.length === 0) continue;
     const taken = state.discard.slice(state.discard.length - 1 - depth);
-    if (!planDiscardPickupMelds([...p.hand, ...taken], p.hasMelded, 0, depth)) {
+    if (
+      !planDiscardPickupMelds([...p.hand, ...taken], p.hasMelded, 0, depth, 1)
+    ) {
       continue;
     }
     // untung = poin kombinasi jadi − beban kartu acak yang ikut terambil
@@ -1138,7 +1149,8 @@ export function botNextAction(state: GameState): BotAction {
       p.hand,
       p.hasMelded,
       pickup.openedCards,
-      pickup.depth
+      pickup.depth,
+      1
     );
     if (plan?.[0]) return { type: "meld", cards: plan[0] };
   }
@@ -1255,11 +1267,12 @@ function drawCardInternal(
     [...p.hand, ...taken],
     p.hasMelded,
     0,
-    depth
+    depth,
+    1
   );
   if (!plan) {
     throw new Error(
-      `Ambilan ini tidak bisa diselesaikan: buka minimal ${depth} kartu sebelum membuang.`
+      `Ambilan ini tidak bisa diselesaikan: buka minimal ${depth} kartu dan sisakan satu kartu untuk tutup.`
     );
   }
 
@@ -1285,11 +1298,31 @@ function meldCardsInternal(state: GameState, cards: CardCode[]): Meld {
     if (!p.hand.includes(c)) throw new Error("kartu tak ada");
   const resolved = validateMeld(cards, p.hasMelded);
   if (!resolved) throw new Error("kombinasi tidak valid");
+  const remaining = removeCardsFromHand(p.hand, cards);
+  if (!remaining) throw new Error("kartu tak ada");
+  if (remaining.length === 0) {
+    throw new Error("Sisakan satu kartu untuk tutup tangan");
+  }
+  const pickup = state.discardPickup;
+  if (
+    pickup &&
+    !planDiscardPickupMelds(
+      remaining,
+      true,
+      pickup.openedCards + cards.length,
+      pickup.depth,
+      1
+    )
+  ) {
+    throw new Error(
+      "Kombinasi ini membuat kewajiban buka kartu dari buangan tidak dapat diselesaikan"
+    );
+  }
   const nats = cards.filter(c => !isJoker(c));
   const kind: "seri" | "set" = nats.every(c => c[0] === nats[0][0])
     ? "set"
     : "seri";
-  for (const c of cards) p.hand.splice(p.hand.indexOf(c), 1);
+  p.hand = remaining;
   const meld: Meld = {
     id: `m${state.round}-${p.seat}-${state.melds.length}`,
     ownerSeat: p.seat,
@@ -1300,14 +1333,13 @@ function meldCardsInternal(state: GameState, cards: CardCode[]): Meld {
   meld.points = meldPoints(meld);
   state.melds.push(meld);
   p.hasMelded = true;
-  if (state.discardPickup) {
-    state.discardPickup.openedCards += cards.length;
+  if (pickup) {
+    pickup.openedCards += cards.length;
   }
   pushLog(
     state,
     `${p.name} buka ${kind}: ${cards.map(cardLabel).join(" ")} (+${meld.points})`
   );
-  if (p.hand.length === 0) endSession(state, "tutup", p.seat);
   return meld;
 }
 
@@ -1322,11 +1354,27 @@ function discardCardInternal(
   const pickup = state.discardPickup;
   if (pickup) {
     if (pickup.openedCards < pickup.depth) {
-      throw new Error(
-        `Ambil ${pickup.cardsTaken} kartu dari buangan: buka minimal ${pickup.depth} kartu sebelum membuang.`
+      const plan = planDiscardPickupMelds(
+        p.hand,
+        p.hasMelded,
+        pickup.openedCards,
+        pickup.depth,
+        1
+      );
+      if (plan) {
+        throw new Error(
+          `Ambil ${pickup.cardsTaken} kartu dari buangan: buka minimal ${pickup.depth} kartu sebelum membuang.`
+        );
+      }
+      // Snapshot lama atau state yang sudah tidak mungkin diselesaikan tidak
+      // boleh mengunci giliran pemain selamanya.
+      state.discardPickup = null;
+      pushLog(
+        state,
+        `${p.name} tidak memiliki kombinasi untuk memenuhi kewajiban buka; kewajiban dibatalkan.`
       );
     }
-    if (p.hand.length - 1 > CARDS_PER_PLAYER) {
+    if (state.discardPickup && p.hand.length - 1 > CARDS_PER_PLAYER) {
       throw new Error(
         `Sisa kartu setelah membuang harus maksimal ${CARDS_PER_PLAYER}.`
       );

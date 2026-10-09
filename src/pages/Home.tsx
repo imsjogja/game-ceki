@@ -789,8 +789,8 @@ export default function Home() {
               <AccordionContent className="text-sm leading-relaxed text-white/70">
                 Setiap pemain memegang <b>7 kartu</b> dari dek 52 kartu + <b>2 joker</b>.
                 Susun kartu menjadi kombinasi <b>jadi</b>: <b>Seri</b> (3+ kartu berurutan
-                sebunga — As melingkar, jadi K-A-2 sah) dan <b>Set</b> (3–4 kartu berangka
-                sama). Kartu jadi bernilai <b className="text-[#7fd4a4]">PLUS</b>, kartu sisa
+                sebunga dari 2 sampai K; As tidak masuk urutan) dan <b>Set</b> (3–4 kartu
+                berangka sama, termasuk As). Kartu jadi bernilai <b className="text-[#7fd4a4]">PLUS</b>, kartu sisa
                 di tangan bernilai <b className="text-[#e0707f]">MINUS</b>. Skor diakumulasi
                 antar-sesi — pemain pertama yang menembus <b>target skor</b> menang.
                 Hati-hati: kalau skormu <b>tersalip</b> pemain lain, skormu hangus ke 0!
